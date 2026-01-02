@@ -4,10 +4,16 @@ import 'package:penny_pop_app/screens/coach_screen.dart';
 import 'package:penny_pop_app/screens/home_screen.dart';
 import 'package:penny_pop_app/screens/pods_screen.dart';
 import 'package:penny_pop_app/screens/settings_screen.dart';
+import 'package:penny_pop_app/screens/splash_screen.dart';
 import 'package:penny_pop_app/shell/app_shell.dart';
 
 final GoRouter appRouter = GoRouter(
+  initialLocation: '/splash',
   routes: <RouteBase>[
+    GoRoute(
+      path: '/splash',
+      builder: (context, state) => const SplashScreen(),
+    ),
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) {
         return AppShell(navigationShell: navigationShell);
