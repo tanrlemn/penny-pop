@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:penny_pop_app/widgets/pixel_nav_icon.dart';
 
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.navigationShell});
@@ -22,15 +23,36 @@ class AppShell extends StatelessWidget {
         currentIndex: navigationShell.currentIndex,
         onTap: _onTap,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.local_florist), label: 'Pods'),
-          BottomNavigationBarItem(icon: Icon(Icons.school), label: 'Coach'),
-          BottomNavigationBarItem(icon: Icon(Icons.directions_run), label: 'Activity'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+          BottomNavigationBarItem(
+            icon: PixelNavIcon(
+              'assets/icons/nav/overview.svg',
+              semanticLabel: 'Overview',
+            ),
+            label: 'Overview',
+          ),
+          BottomNavigationBarItem(
+            icon: PixelNavIcon(
+              'assets/icons/nav/pods.svg',
+              semanticLabel: 'Pods',
+            ),
+            label: 'Pods',
+          ),
+          BottomNavigationBarItem(
+            icon: PixelNavIcon(
+              'assets/icons/nav/guide.svg',
+              semanticLabel: 'Guide',
+            ),
+            label: 'Guide',
+          ),
+          BottomNavigationBarItem(
+            icon: PixelNavIcon(
+              'assets/icons/nav/transactions.svg',
+              semanticLabel: 'Transactions',
+            ),
+            label: 'Transactions',
+          ),
         ],
       ),
     );
   }
 }
-
-

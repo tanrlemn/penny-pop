@@ -34,6 +34,18 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
         builder: (context, state) => const SplashScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(path: '/coach', redirect: (context, state) => '/guide'),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsScreen(),
+        routes: <RouteBase>[
+          GoRoute(path: 'me', builder: (context, state) => const MeScreen()),
+          GoRoute(
+            path: 'add-partner',
+            builder: (context, state) => const AddPartnerScreen(),
+          ),
+        ],
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return AppShell(navigationShell: navigationShell);
@@ -58,7 +70,7 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
           StatefulShellBranch(
             routes: <RouteBase>[
               GoRoute(
-                path: '/coach',
+                path: '/guide',
                 builder: (context, state) => const CoachScreen(),
               ),
             ],
@@ -68,24 +80,6 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
               GoRoute(
                 path: '/activity',
                 builder: (context, state) => const ActivityScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: <RouteBase>[
-              GoRoute(
-                path: '/settings',
-                builder: (context, state) => const SettingsScreen(),
-                routes: <RouteBase>[
-                  GoRoute(
-                    path: 'me',
-                    builder: (context, state) => const MeScreen(),
-                  ),
-                  GoRoute(
-                    path: 'add-partner',
-                    builder: (context, state) => const AddPartnerScreen(),
-                  ),
-                ],
               ),
             ],
           ),

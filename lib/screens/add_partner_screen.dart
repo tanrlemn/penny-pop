@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
 import 'package:penny_pop_app/households/household_service.dart';
+import 'package:penny_pop_app/widgets/pixel_icon.dart';
 
 class AddPartnerScreen extends StatefulWidget {
   const AddPartnerScreen({super.key});
@@ -40,14 +41,14 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
         _lastAddedEmail = email;
         _lastAddedUserId = userId;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Partner added: $email')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Partner added: $email')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Add partner failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add partner failed: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -62,7 +63,8 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
     final isAdmin = role == 'admin';
     final householdId = active?.id;
     final emailText = _emailController.text.trim();
-    final canSubmit = isAdmin && householdId != null && !_saving && emailText.isNotEmpty;
+    final canSubmit =
+        isAdmin && householdId != null && !_saving && emailText.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Add partner')),
@@ -86,14 +88,18 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
                 children: [
                   const Padding(
                     padding: EdgeInsets.only(top: 2),
-                    child: Icon(Icons.check_circle),
+                    child: PixelIcon(
+                      'assets/icons/ui/check_circle.svg',
+                      semanticLabel: 'Success',
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       _lastAddedUserId == null
-                          ? 'Added ${_lastAddedEmail!}. They may need to refresh Settings or restart the app to see the shared household.'
-                          : 'Added ${_lastAddedEmail!} (user: ${_lastAddedUserId!}). They may need to refresh Settings or restart the app to see the shared household.',
+                          ? 'Added ${_lastAddedEmail!}. They may need to open Account (top-right icon) → Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.'
+                          : 'Added ${_lastAddedEmail!} (user: ${_lastAddedUserId!}). They may need to open Account (top-right icon) → Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.',
                       style: const TextStyle(height: 1.3),
                     ),
                   ),
@@ -130,7 +136,8 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
             FilledButton(
               onPressed: !canSubmit
                   ? null
-                  : () => _addPartner(householdId: householdId, email: emailText),
+                  : () =>
+                        _addPartner(householdId: householdId, email: emailText),
               child: _saving
                   ? const SizedBox(
                       width: 18,
@@ -144,9 +151,9 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
               Text(
                 'Only admins can add members (your role: ${role ?? 'unknown'}).',
                 style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(
-                        alpha: 0.7,
-                      ),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.7),
                 ),
               ),
             ],
@@ -156,5 +163,3 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
     );
   }
 }
-
-

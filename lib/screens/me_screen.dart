@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:penny_pop_app/widgets/pixel_icon.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MeScreen extends StatelessWidget {
@@ -35,7 +36,10 @@ class MeScreen extends StatelessWidget {
             subtitle: Text(userId),
             trailing: IconButton(
               onPressed: user?.id == null ? null : () => copy(userId, 'User ID'),
-              icon: const Icon(Icons.copy),
+              icon: const PixelIcon(
+                'assets/icons/ui/copy.svg',
+                semanticLabel: 'Copy',
+              ),
               tooltip: 'Copy',
             ),
           ),
@@ -45,7 +49,10 @@ class MeScreen extends StatelessWidget {
             subtitle: Text(email),
             trailing: IconButton(
               onPressed: user?.email == null ? null : () => copy(email, 'Email'),
-              icon: const Icon(Icons.copy),
+              icon: const PixelIcon(
+                'assets/icons/ui/copy.svg',
+                semanticLabel: 'Copy',
+              ),
               tooltip: 'Copy',
             ),
           ),
