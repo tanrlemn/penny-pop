@@ -104,7 +104,7 @@ class _UserDrawerSheetState extends State<_UserDrawerSheet> {
     );
   }
 
-  void _closeSheet() => Navigator.of(context).pop();
+  void _closeSheet() => Navigator.of(context, rootNavigator: true).pop();
 
   Future<void> _signOutFlow() async {
     final confirmed = await showDialog<bool>(
@@ -146,14 +146,24 @@ class _UserDrawerSheetState extends State<_UserDrawerSheet> {
     final user = AuthService.instance.currentUser;
     final email = user?.email ?? 'Not signed in';
 
+    final canGoBack = _canGoBack;
     return PopScope(
-      canPop: false,
-      onPopInvoked: (_) {
-        if (_canGoBack) {
+      // Let the sheet route pop normally when we're on the root page; otherwise
+      // intercept back to pop the nested Navigator instead.
+      canPop: !canGoBack,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        if (canGoBack) {
           _goBack();
           return;
         }
-        _closeSheet();
+
+        // If we get here, the pop was prevented but there's nothing to pop in
+        // the nested Navigator. Defer a close to avoid re-entrant pops.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _closeSheet();
+        });
       },
       child: Builder(
         builder: (context) {
