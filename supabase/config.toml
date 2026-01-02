@@ -4,6 +4,11 @@
 # working directory name when running `supabase init`.
 project_id = "penny_pop_app"
 
+[functions.sync-pods]
+# Workaround for clients that fail to pass `Authorization` through to Edge Functions.
+# We still enforce auth inside the function by requiring the access token in the request body.
+verify_jwt = false
+
 [api]
 enabled = true
 # Port to use for the API URL.

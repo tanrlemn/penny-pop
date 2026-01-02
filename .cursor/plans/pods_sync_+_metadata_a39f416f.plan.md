@@ -4,15 +4,15 @@ overview: Add household-scoped `pods` synced from Sequence (no in-app creation) 
 todos:
   - id: db-pods-tables
     content: Add migration for `pods` + `pod_settings`, constraints, indexes, and RLS policies aligned with household membership.
-    status: pending
+    status: completed
   - id: edge-sync-pods
     content: Implement Supabase Edge Function `sync-pods` (admin-only) that calls Sequence `POST /account`, upserts pods by `(household_id, sequence_account_id)`, and deactivates missing pods.
-    status: pending
+    status: completed
     dependencies:
       - db-pods-tables
   - id: flutter-pods-ui
     content: Replace placeholder `PodsScreen` with synced pods list, admin-only Sync button, and pod settings editor (category/notes) backed by `pod_settings` upserts.
-    status: pending
+    status: completed
     dependencies:
       - db-pods-tables
       - edge-sync-pods
@@ -162,6 +162,9 @@ Edge->>DB: deactivate missing pods
 Edge-->>App: {upserted,deactivated}
 App->>DB: select pods + pod_settings (RLS)
 DB-->>App: active pod list
+
+
+
 
 
 

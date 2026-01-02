@@ -11,7 +11,7 @@ void showGlassToast(
   String message, {
   Duration duration = const Duration(seconds: 2),
 }) {
-  final overlay = Overlay.of(context);
+  final overlay = Overlay.of(context, rootOverlay: true);
 
   final reduceMotion = GlassAdaptive.reduceMotionOf(context);
   OverlayEntry? entry;
@@ -19,13 +19,14 @@ void showGlassToast(
   entry = OverlayEntry(
     builder: (context) {
       final safe = MediaQuery.of(context).padding;
-      // Keep it above the bottom tab bar region.
-      final bottom = safe.bottom + 90;
+      // Position below the nav bar area so it doesn't fight the bottom tab bar.
+      const navBarHeight = 44.0;
+      final top = safe.top + navBarHeight + 12;
 
       return Positioned(
         left: 16,
         right: 16,
-        bottom: bottom,
+        top: top,
         child: IgnorePointer(
           child: _ToastSurface(
             message: message,
@@ -55,14 +56,24 @@ class _ToastSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = GlassAdaptive.brightnessOf(context);
+    final textColor = brightness == Brightness.dark
+        ? const Color(0xFFF5F5F5)
+        : const Color(0xFF111111);
+
     final child = GlassSurface(
       borderRadius: const BorderRadius.all(Radius.circular(14)),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: DefaultTextStyle(
-        style: const TextStyle(fontSize: 14, height: 1.2),
+        style: TextStyle(
+          fontSize: 14,
+          height: 1.2,
+          color: textColor,
+          fontWeight: FontWeight.w600,
+        ),
         child: Text(
           message,
-          maxLines: 2,
+          maxLines: 3,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
         ),
