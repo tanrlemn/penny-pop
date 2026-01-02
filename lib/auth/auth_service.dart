@@ -14,7 +14,22 @@ class AuthService {
   Session? get currentSession => _supabase.auth.currentSession;
   User? get currentUser => _supabase.auth.currentUser;
 
-  Future<void> signInWithGoogle() async {
+  Future<void> signInWithGoogle({bool forceAccountChooser = false}) async {
+    if (forceAccountChooser) {
+      // Best-effort: ensure the next sign-in shows the account picker instead of
+      // silently reusing the last Google account.
+      try {
+        await _googleSignIn.disconnect();
+      } catch (_) {
+        // ignore
+      }
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {
+        // ignore
+      }
+    }
+
     final googleUser = await _googleSignIn.signIn();
     if (googleUser == null) {
       // User canceled the flow.
@@ -36,13 +51,23 @@ class AuthService {
     );
   }
 
-  Future<void> signOut({bool alsoSignOutGoogle = true}) async {
+  Future<void> signOut({
+    bool alsoSignOutGoogle = true,
+    bool disconnectGoogle = false,
+  }) async {
     // Supabase sign-out first so the app UI transitions immediately.
     await _supabase.auth.signOut();
 
     if (alsoSignOutGoogle) {
       // `signOut` is sufficient for most apps. Use `disconnect` if you want to
       // revoke consent and require a full account picker next time.
+      if (disconnectGoogle) {
+        try {
+          await _googleSignIn.disconnect();
+        } catch (_) {
+          // ignore
+        }
+      }
       await _googleSignIn.signOut();
     }
   }

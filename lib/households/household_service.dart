@@ -4,14 +4,37 @@ import 'package:flutter/foundation.dart';
 import 'package:penny_pop_app/households/active_household.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+class NotAuthorizedException implements Exception {
+  const NotAuthorizedException([this.message = 'Not authorized']);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class HouseholdService {
   HouseholdService({SupabaseClient? supabase})
       : _supabase = supabase ?? Supabase.instance.client;
 
   final SupabaseClient _supabase;
 
+  bool _looksLikeNotAuthorized(Object e) {
+    // PostgREST wraps raised exceptions; keep this loose and message-based.
+    final s = e.toString().toLowerCase();
+    return s.contains('not authorized');
+  }
+
   Future<ActiveHousehold> ensureActiveHousehold() async {
-    final data = await _supabase.rpc('ensure_active_household');
+    dynamic data;
+    try {
+      data = await _supabase.rpc('ensure_active_household');
+    } catch (e) {
+      if (_looksLikeNotAuthorized(e)) {
+        throw NotAuthorizedException(e.toString());
+      }
+      rethrow;
+    }
 
     Map<String, dynamic>? row;
     if (data is List && data.isNotEmpty) {
@@ -115,6 +138,12 @@ class ActiveHouseholdController extends ChangeNotifier {
       _lastUserId = userId;
     } catch (e) {
       _error = e;
+      // If the user is signed in but not authorized for the family household,
+      // treat that as a stable state (don't keep re-attempting on rebuilds).
+      if (e is NotAuthorizedException) {
+        _active = null;
+        _lastUserId = userId;
+      }
     } finally {
       _isLoading = false;
       notifyListeners();

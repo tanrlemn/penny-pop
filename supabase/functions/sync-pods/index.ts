@@ -9,6 +9,8 @@ type EnsureActiveHouseholdRow = {
 
 type SequenceAccount = Record<string, unknown>;
 
+const FAMILY_HOUSEHOLD_ID = "4b7c62d7-7584-4665-a1e7-991700d4d30c";
+
 const corsHeaders: HeadersInit = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers":
@@ -115,12 +117,14 @@ serve(async (req) => {
       // If the JWT is invalid/expired, PostgREST will reject the request.
       // Surface that as a 401 so the client can prompt re-auth if needed.
       const msg = householdError.message ?? "Unknown error";
+      const lower = msg.toLowerCase();
       const isAuthish = msg.toLowerCase().includes("jwt") ||
         msg.toLowerCase().includes("not authenticated") ||
         msg.toLowerCase().includes("unauthorized");
+      const isNotAuthorized = lower.includes("not authorized");
       return jsonResponse(
         { error: `ensure_active_household failed: ${msg}` },
-        { status: isAuthish ? 401 : 400 },
+        { status: isNotAuthorized ? 403 : (isAuthish ? 401 : 400) },
       );
     }
 
@@ -136,6 +140,11 @@ serve(async (req) => {
         { error: "Unexpected ensure_active_household response" },
         { status: 500 },
       );
+    }
+
+    // Defense-in-depth: even if someone can sign in, only the family household can sync.
+    if (householdRow.household_id !== FAMILY_HOUSEHOLD_ID) {
+      return jsonResponse({ error: "Not allowed" }, { status: 403 });
     }
 
     if (householdRow.role !== "admin") {

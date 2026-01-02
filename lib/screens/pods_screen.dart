@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
 import 'package:penny_pop_app/design/glass/glass.dart';
-import 'package:penny_pop_app/design/glass/glass_toast.dart';
 import 'package:penny_pop_app/pods/pod_models.dart';
 import 'package:penny_pop_app/pods/pods_service.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
@@ -324,7 +323,7 @@ class _PodsScreenState extends State<PodsScreen> {
                       children: [
                         CupertinoButton(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          minSize: 0,
+                          minimumSize: Size.zero,
                           pressedOpacity: 0.65,
                           alignment: Alignment.centerLeft,
                           onPressed: () => _editPodSettings(pod),

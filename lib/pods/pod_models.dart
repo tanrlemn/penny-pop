@@ -60,7 +60,7 @@ class Pod {
     }
 
     final beRaw = row['balance_error'];
-    final balanceError = beRaw == null ? null : beRaw.toString();
+    final balanceError = beRaw?.toString();
 
     return Pod(
       id: row['id'].toString(),

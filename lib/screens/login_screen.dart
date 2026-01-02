@@ -18,7 +18,8 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await AuthService.instance.signInWithGoogle();
+      // Force account picker so users can switch accounts (family-only app).
+      await AuthService.instance.signInWithGoogle(forceAccountChooser: true);
     } catch (e) {
       if (!mounted) return;
       showGlassToast(context, 'Sign-in failed: $e');

@@ -1,7 +1,11 @@
 import 'package:flutter/cupertino.dart';
 import 'package:go_router/go_router.dart';
+import 'package:penny_pop_app/app/penny_pop_scope.dart';
+import 'package:penny_pop_app/auth/auth_service.dart';
 import 'package:penny_pop_app/design/glass/glass.dart';
+import 'package:penny_pop_app/households/household_service.dart';
 import 'package:penny_pop_app/widgets/pixel_nav_icon.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.navigationShell});
@@ -17,6 +21,9 @@ class AppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final household = PennyPopScope.householdOf(context);
+    final unauthorized = household.error is NotAuthorizedException;
+
     final reduceMotion = GlassAdaptive.reduceMotionOf(context);
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final safeBottom = MediaQuery.of(context).padding.bottom;
@@ -36,6 +43,10 @@ class AppShell extends StatelessWidget {
               child: navigationShell,
             ),
           ),
+          if (unauthorized)
+            const Positioned.fill(
+              child: _NotAuthorizedOverlay(),
+            ),
           Positioned(
             left: horizontalInset,
             right: horizontalInset,
@@ -63,6 +74,61 @@ class AppShell extends StatelessWidget {
   }
 }
 
+class _NotAuthorizedOverlay extends StatelessWidget {
+  const _NotAuthorizedOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = CupertinoColors.systemBackground.resolveFrom(context);
+    final primary = CupertinoColors.label.resolveFrom(context);
+    final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
+    final email = Supabase.instance.client.auth.currentUser?.email;
+
+    return ColoredBox(
+      color: bg,
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Not authorized',
+                  style: TextStyle(
+                    color: primary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  email == null || email.isEmpty
+                      ? 'This account is not allowed to access this app.'
+                      : 'This account ($email) is not allowed to access this app.',
+                  style: TextStyle(color: secondary, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                CupertinoButton.filled(
+                  onPressed: () async {
+                    await AuthService.instance.signOut(
+                      alsoSignOutGoogle: true,
+                      disconnectGoogle: true,
+                    );
+                  },
+                  child: const Text('Sign out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _GlassBottomTabBar extends StatelessWidget {
   const _GlassBottomTabBar({required this.currentIndex, required this.onTap});
 
@@ -74,7 +140,7 @@ class _GlassBottomTabBar extends StatelessWidget {
     final reduceMotion = GlassAdaptive.reduceMotionOf(context);
     final brightness = GlassAdaptive.brightnessOf(context);
 
-    const tabCount = 4;
+    const tabCount = 3;
     const bubbleSideInset = 6.0;
 
     final bubbleColor = brightness == Brightness.dark
@@ -197,11 +263,6 @@ class _GlassBottomTabBar extends StatelessWidget {
                     index: 2,
                     label: 'Guide',
                     assetPath: 'assets/icons/nav/guide.svg',
-                  ),
-                  tab(
-                    index: 3,
-                    label: 'Transactions',
-                    assetPath: 'assets/icons/nav/transactions.svg',
                   ),
                 ],
               ),

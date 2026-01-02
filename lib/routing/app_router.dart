@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:go_router/go_router.dart';
-import 'package:penny_pop_app/screens/activity_screen.dart';
 import 'package:penny_pop_app/screens/coach_screen.dart';
 import 'package:penny_pop_app/screens/home_screen.dart';
 import 'package:penny_pop_app/screens/login_screen.dart';
@@ -66,17 +65,6 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
                 pageBuilder: (context, state) => NoTransitionPage<void>(
                   key: state.pageKey,
                   child: const CoachScreen(),
-                ),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: <RouteBase>[
-              GoRoute(
-                path: '/activity',
-                pageBuilder: (context, state) => NoTransitionPage<void>(
-                  key: state.pageKey,
-                  child: const ActivityScreen(),
                 ),
               ),
             ],
