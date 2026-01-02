@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
 
 class PixelNavIcon extends StatelessWidget {

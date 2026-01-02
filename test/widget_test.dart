@@ -34,11 +34,10 @@ void main() {
     expect(find.text('Welcome to Penny Pop'), findsOneWidget);
     expect(find.text('Continue with Google'), findsOneWidget);
 
-    final button = tester.widget<OutlinedButton>(find.byType(OutlinedButton));
-    final background = button.style?.backgroundColor?.resolve(<WidgetState>{});
-    final foreground = button.style?.foregroundColor?.resolve(<WidgetState>{});
+    final decorated =
+        tester.widget<DecoratedBox>(find.byKey(const ValueKey('googleSignInButton')));
+    final decoration = decorated.decoration as BoxDecoration;
 
-    expect(background, const Color(0xFF131314));
-    expect(foreground, Colors.white);
+    expect(decoration.color, const Color(0xFF131314));
   });
 }

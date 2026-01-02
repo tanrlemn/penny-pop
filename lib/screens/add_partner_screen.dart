@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
+import 'package:penny_pop_app/design/glass/glass.dart';
 import 'package:penny_pop_app/households/household_service.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
 
@@ -41,14 +42,10 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
         _lastAddedEmail = email;
         _lastAddedUserId = userId;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Partner added: $email')));
+      showGlassToast(context, 'Partner added: $email');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Add partner failed: $e')));
+      showGlassToast(context, 'Add partner failed: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -66,99 +63,95 @@ class _AddPartnerScreenState extends State<AddPartnerScreen> {
     final canSubmit =
         isAdmin && householdId != null && !_saving && emailText.isNotEmpty;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Add partner')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Text(
-            'Your partner must sign in once first, then enter their email here.',
-            style: TextStyle(height: 1.3),
-          ),
-          if (_lastAddedEmail != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
+    return CupertinoPageScaffold(
+      navigationBar: const CupertinoNavigationBar(middle: Text('Add partner')),
+      child: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Text(
+              'Your partner must sign in once first, then enter their email here.',
+              style: TextStyle(height: 1.3),
+            ),
+            if (_lastAddedEmail != null) ...[
+              const SizedBox(height: 12),
+              GlassCard(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: PixelIcon(
+                        'assets/icons/ui/check_circle.svg',
+                        semanticLabel: 'Success',
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _lastAddedUserId == null
+                            ? 'Added ${_lastAddedEmail!}. They may need to open Account → Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.'
+                            : 'Added ${_lastAddedEmail!} (user: ${_lastAddedUserId!}). They may need to open Account → Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.',
+                        style: const TextStyle(height: 1.3),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            ],
+            const SizedBox(height: 12),
+            if (active == null)
+              const Text('Household not loaded yet. Go back and try again.')
+            else ...[
+              CupertinoListSection.insetGrouped(
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 2),
-                    child: PixelIcon(
-                      'assets/icons/ui/check_circle.svg',
-                      semanticLabel: 'Success',
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _lastAddedUserId == null
-                          ? 'Added ${_lastAddedEmail!}. They may need to open Account (top-right icon) → Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.'
-                          : 'Added ${_lastAddedEmail!} (user: ${_lastAddedUserId!}). They may need to open Account (top-right icon) → Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.',
-                      style: const TextStyle(height: 1.3),
-                    ),
+                  CupertinoListTile(
+                    title: const Text('Household'),
+                    additionalInfo: Text('${active.name}\n${active.id}'),
                   ),
                 ],
               ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          if (active == null)
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('Household not loaded yet'),
-              subtitle: Text('Go back and try again in a moment.'),
-            )
-          else ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Household'),
-              subtitle: Text('${active.name}\n${active.id}'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: const [AutofillHints.email],
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Partner email',
-                hintText: 'partner@gmail.com',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: !canSubmit
-                  ? null
-                  : () =>
-                        _addPartner(householdId: householdId, email: emailText),
-              child: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Add partner'),
-            ),
-            if (!isAdmin) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Only admins can add members (your role: ${role ?? 'unknown'}).',
-                style: TextStyle(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.7),
+              const SizedBox(height: 12),
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    CupertinoTextField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.email],
+                      onChanged: (_) => setState(() {}),
+                      placeholder: 'partner@gmail.com',
+                    ),
+                    const SizedBox(height: 12),
+                    CupertinoButton.filled(
+                      onPressed: !canSubmit
+                          ? null
+                          : () => _addPartner(
+                                householdId: householdId,
+                                email: emailText,
+                              ),
+                      child: _saving
+                          ? const CupertinoActivityIndicator()
+                          : const Text('Add partner'),
+                    ),
+                    if (!isAdmin) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Only admins can add members (your role: ${role ?? 'unknown'}).',
+                        style: TextStyle(
+                          color: CupertinoColors.secondaryLabel.resolveFrom(context),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
           ],
-        ],
+        ),
       ),
     );
   }

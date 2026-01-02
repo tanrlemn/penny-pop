@@ -1,125 +1,72 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
 import 'package:penny_pop_app/auth/auth_service.dart';
+import 'package:penny_pop_app/design/glass/glass.dart';
 import 'package:penny_pop_app/households/household_service.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
 
 Future<void> showUserMenuSheet(BuildContext context) async {
-  await showModalBottomSheet<void>(
+  await showCupertinoModalPopup<void>(
     context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
     useRootNavigator: true,
-    useSafeArea: true,
-    builder: (_) => _UserDrawerSheet(parentContext: context),
+    builder: (popupContext) => _UserMenuSheet(parentContext: context),
   );
 }
 
-enum _UserSheetRoute { menu, account, myInfo, invitePartner }
+enum _UserSheetPage { menu, account, myInfo, invitePartner }
 
-class _UserDrawerSheet extends StatefulWidget {
-  const _UserDrawerSheet({required this.parentContext});
+class _UserMenuSheet extends StatefulWidget {
+  const _UserMenuSheet({required this.parentContext});
 
   final BuildContext parentContext;
 
   @override
-  State<_UserDrawerSheet> createState() => _UserDrawerSheetState();
+  State<_UserMenuSheet> createState() => _UserMenuSheetState();
 }
 
-class _UserDrawerSheetState extends State<_UserDrawerSheet> {
-  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
-  _UserSheetRoute _route = _UserSheetRoute.menu;
+class _UserMenuSheetState extends State<_UserMenuSheet> {
+  _UserSheetPage _page = _UserSheetPage.menu;
 
-  final _emailController = TextEditingController();
-  bool _saving = false;
+  final TextEditingController _inviteEmailController = TextEditingController();
+  bool _savingInvite = false;
   String? _lastAddedEmail;
   String? _lastAddedUserId;
 
-  String? _pendingRouteName;
-  bool _routeUpdateScheduled = false;
-
-  late final NavigatorObserver _navObserver = _SheetNavObserver(
-    onChanged: _scheduleRouteUpdate,
-  );
-
-  _UserSheetRoute _routeFromName(String? name) {
-    return switch (name) {
-      'account' => _UserSheetRoute.account,
-      'myInfo' => _UserSheetRoute.myInfo,
-      'invitePartner' => _UserSheetRoute.invitePartner,
-      _ => _UserSheetRoute.menu,
-    };
-  }
-
-  void _scheduleRouteUpdate(String? name) {
-    _pendingRouteName = name;
-    if (_routeUpdateScheduled) return;
-    _routeUpdateScheduled = true;
-
-    // Navigator observers can fire during the nested Navigator's build/restore.
-    // Defer updates to avoid "setState() called during build" exceptions.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _routeUpdateScheduled = false;
-      if (!mounted) return;
-
-      final nextRoute = _routeFromName(_pendingRouteName);
-      if (_route == nextRoute) return;
-      setState(() => _route = nextRoute);
-    });
-  }
-
   @override
   void dispose() {
-    _emailController.dispose();
+    _inviteEmailController.dispose();
     super.dispose();
   }
 
-  String get _title {
-    return switch (_route) {
-      _UserSheetRoute.menu => 'Account',
-      _UserSheetRoute.account => 'Account & household',
-      _UserSheetRoute.myInfo => 'My info',
-      _UserSheetRoute.invitePartner => 'Invite partner',
-    };
-  }
+  bool get _canGoBack => _page != _UserSheetPage.menu;
 
-  bool get _canGoBack => _navKey.currentState?.canPop() ?? false;
+  void _goBack() => setState(() => _page = _UserSheetPage.menu);
 
-  void _goBack() {
-    if (_canGoBack) {
-      _navKey.currentState?.maybePop();
-    }
-  }
+  void _close() => Navigator.of(context, rootNavigator: true).pop();
 
-  void _push(_UserSheetRoute route) {
-    final navigator = _navKey.currentState;
-    if (navigator == null) return;
-
-    navigator.push(
-      _sheetRoute(
-        route: route,
-        email: AuthService.instance.currentUser?.email ?? 'Not signed in',
-      ),
-    );
-  }
-
-  void _closeSheet() => Navigator.of(context, rootNavigator: true).pop();
+  String get _title => switch (_page) {
+        _UserSheetPage.menu => 'Account',
+        _UserSheetPage.account => 'Account & household',
+        _UserSheetPage.myInfo => 'My info',
+        _UserSheetPage.invitePartner => 'Invite partner',
+      };
 
   Future<void> _signOutFlow() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showCupertinoDialog<bool>(
       context: context,
       useRootNavigator: true,
       builder: (dialogContext) {
-        return AlertDialog(
+        return CupertinoAlertDialog(
           title: const Text('Sign out?'),
           content: const Text('You can sign back in anytime.'),
           actions: [
-            TextButton(
+            CupertinoDialogAction(
               onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('Cancel'),
             ),
-            FilledButton(
+            CupertinoDialogAction(
+              isDestructiveAction: true,
               onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('Sign out'),
             ),
@@ -128,16 +75,42 @@ class _UserDrawerSheetState extends State<_UserDrawerSheet> {
       },
     );
 
+    if (!mounted) return;
     if (confirmed != true) return;
 
-    _closeSheet();
+    _close(); // close sheet
     try {
       await AuthService.instance.signOut(alsoSignOutGoogle: true);
     } catch (e) {
       if (!widget.parentContext.mounted) return;
-      ScaffoldMessenger.of(
-        widget.parentContext,
-      ).showSnackBar(SnackBar(content: Text('Sign out failed: $e')));
+      showGlassToast(widget.parentContext, 'Sign out failed: $e');
+    }
+  }
+
+  Future<void> _invitePartner({
+    required String householdId,
+    required String email,
+  }) async {
+    if (_savingInvite) return;
+    setState(() => _savingInvite = true);
+    try {
+      final userId = await HouseholdService().addHouseholdMemberByEmail(
+        householdId: householdId,
+        email: email,
+      );
+      if (!mounted) return;
+      FocusScope.of(context).unfocus();
+      _inviteEmailController.clear();
+      setState(() {
+        _lastAddedEmail = email;
+        _lastAddedUserId = userId;
+      });
+      showGlassToast(context, 'Partner added: $email');
+    } catch (e) {
+      if (!mounted) return;
+      showGlassToast(context, 'Add partner failed: $e');
+    } finally {
+      if (mounted) setState(() => _savingInvite = false);
     }
   }
 
@@ -146,228 +119,273 @@ class _UserDrawerSheetState extends State<_UserDrawerSheet> {
     final user = AuthService.instance.currentUser;
     final email = user?.email ?? 'Not signed in';
 
-    final canGoBack = _canGoBack;
+    final household = PennyPopScope.householdOf(widget.parentContext);
+    final active = household.active;
+    final isAdmin = active?.role == 'admin';
+    final householdName = active?.name ?? 'No household';
+
+    final height = MediaQuery.sizeOf(context).height * 0.62;
+    final reduceMotion = GlassAdaptive.reduceMotionOf(context);
+
+    final content = switch (_page) {
+      _UserSheetPage.menu => _MenuPage(
+          email: email,
+          householdName: householdName,
+          isAdmin: isAdmin,
+          onAccount: () => setState(() => _page = _UserSheetPage.account),
+          onMyInfo: () => setState(() => _page = _UserSheetPage.myInfo),
+          onInvitePartner: isAdmin
+              ? () => setState(() => _page = _UserSheetPage.invitePartner)
+              : null,
+          onSignOut: _signOutFlow,
+        ),
+      _UserSheetPage.account => _AccountPage(householdName: householdName),
+      _UserSheetPage.myInfo => _MyInfoPage(
+          userId: user?.id,
+          email: user?.email,
+        ),
+      _UserSheetPage.invitePartner => _InvitePartnerPage(
+          isAdmin: isAdmin,
+          householdId: active?.id,
+          householdName: active?.name,
+          emailController: _inviteEmailController,
+          saving: _savingInvite,
+          lastAddedEmail: _lastAddedEmail,
+          lastAddedUserId: _lastAddedUserId,
+          onChanged: () => setState(() {}),
+          onSubmit: _invitePartner,
+        ),
+    };
+
     return PopScope(
-      // Let the sheet route pop normally when we're on the root page; otherwise
-      // intercept back to pop the nested Navigator instead.
-      canPop: !canGoBack,
-      onPopInvoked: (didPop) {
+      canPop: !_canGoBack,
+      onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (canGoBack) {
-          _goBack();
-          return;
-        }
-
-        // If we get here, the pop was prevented but there's nothing to pop in
-        // the nested Navigator. Defer a close to avoid re-entrant pops.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _closeSheet();
-        });
+        if (_canGoBack) _goBack();
       },
-      child: Builder(
-        builder: (context) {
-          final viewInsets = MediaQuery.of(context).viewInsets;
-          final height = MediaQuery.sizeOf(context).height * 0.7;
-
-          return AnimatedPadding(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: GlassSurface(
+              borderRadius: const BorderRadius.all(Radius.circular(24)),
+              padding: EdgeInsets.zero,
             child: SizedBox(
               height: height,
-              child: Material(
                 child: Column(
                   children: [
-                    _SheetHeader(
-                      title: _title,
-                      canGoBack: _canGoBack,
-                      onBack: _goBack,
+                    const SizedBox(height: 10),
+                    Container(
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.systemGrey2.resolveFrom(context),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          if (_canGoBack)
+                            CupertinoButton(
+                              padding: EdgeInsets.zero,
+                              onPressed: _goBack,
+                              child: const Icon(CupertinoIcons.back, size: 18),
+                            )
+                          else
+                            const SizedBox(width: 34),
+                          Expanded(
+                            child: Text(
+                              _title,
+                              textAlign: TextAlign.center,
+                              style: CupertinoTheme.of(context)
+                                  .textTheme
+                                  .navTitleTextStyle,
+                            ),
+                          ),
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: _close,
+                            child: const Icon(CupertinoIcons.xmark, size: 18),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
                     Expanded(
-                      child: Navigator(
-                        key: _navKey,
-                        observers: [_navObserver],
-                        onGenerateRoute: (settings) {
-                          // Initial route.
-                          if (settings.name == null || settings.name == '/') {
-                            return _sheetRoute(
-                              route: _UserSheetRoute.menu,
-                              email: email,
-                            );
-                          }
-                          return null;
+                      child: AnimatedSwitcher(
+                        duration: reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeOutCubic,
+                        transitionBuilder: (child, animation) {
+                          if (reduceMotion) return child;
+                          return FadeTransition(opacity: animation, child: child);
                         },
+                        child: KeyedSubtree(
+                          key: ValueKey<_UserSheetPage>(_page),
+                          child: content,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
+}
 
-  PageRoute<void> _sheetRoute({
-    required _UserSheetRoute route,
-    required String email,
-  }) {
-    final name = switch (route) {
-      _UserSheetRoute.menu => 'menu',
-      _UserSheetRoute.account => 'account',
-      _UserSheetRoute.myInfo => 'myInfo',
-      _UserSheetRoute.invitePartner => 'invitePartner',
-    };
+class _AccountHeaderRow extends StatelessWidget {
+  const _AccountHeaderRow({
+    required this.email,
+    required this.householdName,
+  });
 
-    return PageRouteBuilder<void>(
-      settings: RouteSettings(name: name),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        final household = PennyPopScope.householdOf(widget.parentContext);
-        final active = household.active;
-        final isAdmin = active?.role == 'admin';
-        final householdName = active?.name ?? 'No household';
+  final String email;
+  final String householdName;
 
-        final user = AuthService.instance.currentUser;
+  @override
+  Widget build(BuildContext context) {
+    final primary = CupertinoColors.label.resolveFrom(context);
+    final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
 
-        final page = switch (route) {
-          _UserSheetRoute.menu => _MenuPage(
-            key: const ValueKey('menu'),
-            email: email,
-            householdName: householdName,
-            isAdmin: isAdmin,
-            onAccount: () => _push(_UserSheetRoute.account),
-            onMyInfo: () => _push(_UserSheetRoute.myInfo),
-            onInvitePartner: isAdmin
-                ? () => _push(_UserSheetRoute.invitePartner)
-                : null,
-            onSignOut: _signOutFlow,
-          ),
-          _UserSheetRoute.account => _AccountPage(
-            key: const ValueKey('account'),
-            email: email,
-            household: household,
-          ),
-          _UserSheetRoute.myInfo => _MyInfoPage(
-            key: const ValueKey('myInfo'),
-            userId: user?.id,
-            email: user?.email,
-            parentContext: widget.parentContext,
-          ),
-          _UserSheetRoute.invitePartner => _InvitePartnerPage(
-            key: const ValueKey('invitePartner'),
-            parentContext: widget.parentContext,
-            householdId: active?.id,
-            householdName: active?.name,
-            isAdmin: isAdmin,
-            emailController: _emailController,
-            saving: _saving,
-            lastAddedEmail: _lastAddedEmail,
-            lastAddedUserId: _lastAddedUserId,
-            onChanged: () => setState(() {}),
-            onSubmit: (householdId, email) async {
-              if (_saving) return;
-              setState(() => _saving = true);
-              try {
-                final userId = await HouseholdService()
-                    .addHouseholdMemberByEmail(
-                      householdId: householdId,
-                      email: email,
-                    );
-                if (!mounted) return;
-                FocusScope.of(context).unfocus();
-                _emailController.clear();
-                setState(() {
-                  _lastAddedEmail = email;
-                  _lastAddedUserId = userId;
-                });
-                ScaffoldMessenger.of(widget.parentContext).showSnackBar(
-                  SnackBar(content: Text('Partner added: $email')),
-                );
-              } catch (e) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(widget.parentContext).showSnackBar(
-                  SnackBar(content: Text('Add partner failed: $e')),
-                );
-              } finally {
-                if (mounted) setState(() => _saving = false);
-              }
-            },
-          ),
-        };
-
-        // Ensure the new route paints a solid background immediately (prevents
-        // seeing the previous page under a fade).
-        return ColoredBox(
-          color: Theme.of(context).colorScheme.surface,
-          child: page,
-        );
-      },
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-        );
-        return FadeTransition(opacity: curved, child: child);
-      },
+    // Pattern 1: iOS-style profile header (non-interactive).
+    // - icon/avatar + primary line + secondary line
+    // - no labels, no chevron, no button highlight
+    return Semantics(
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: CupertinoColors.systemGrey5.resolveFrom(context),
+                shape: BoxShape.circle,
+              ),
+              child: const Center(
+                child: PixelIcon(
+                  'assets/icons/ui/account.svg',
+                  semanticLabel: 'Account',
+                  size: 18,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: CupertinoTheme.of(context)
+                        .textTheme
+                        .textStyle
+                        .copyWith(
+                          color: primary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    householdName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: CupertinoTheme.of(context)
+                        .textTheme
+                        .textStyle
+                        .copyWith(
+                          color: secondary,
+                          fontSize: 13,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-class _SheetNavObserver extends NavigatorObserver {
-  _SheetNavObserver({required this.onChanged});
-
-  final void Function(String? name) onChanged;
-
-  @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onChanged(route.settings.name);
-  }
-
-  @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onChanged(previousRoute?.settings.name);
-  }
-}
-
-class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({
-    required this.title,
-    required this.canGoBack,
-    required this.onBack,
-  });
-
-  final String title;
-  final bool canGoBack;
-  final VoidCallback onBack;
+class _SheetDivider extends StatelessWidget {
+  const _SheetDivider();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+    return Container(
+      height: 1,
+      color: CupertinoColors.separator.resolveFrom(context),
+    );
+  }
+}
+
+class _SheetRow extends StatelessWidget {
+  const _SheetRow({
+    required this.leading,
+    required this.title,
+    required this.onTap,
+    this.isDestructive = false,
+    this.trailing,
+  });
+
+  final Widget leading;
+  final String title;
+  final VoidCallback? onTap;
+  final bool isDestructive;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleColor = isDestructive
+        ? CupertinoColors.systemRed.resolveFrom(context)
+        : CupertinoColors.label.resolveFrom(context);
+
+    return CupertinoButton(
+      padding: EdgeInsets.zero,
+      onPressed: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         children: [
-          if (canGoBack)
-            IconButton(
-              tooltip: 'Back',
-              onPressed: onBack,
-              icon: const PixelIcon(
-                'assets/icons/ui/back.svg',
-                semanticLabel: 'Back',
-              ),
-            )
-          else
-            const SizedBox(width: 48),
+            SizedBox(width: 24, height: 24, child: Center(child: leading)),
+            const SizedBox(width: 12),
           Expanded(
             child: Text(
               title,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: CupertinoTheme.of(context)
+                    .textTheme
+                    .textStyle
+                    .copyWith(color: titleColor, fontSize: 16),
+              ),
             ),
-          ),
-          const SizedBox(width: 48),
-        ],
+            trailing ??
+                Icon(
+                  CupertinoIcons.chevron_right,
+                  size: 18,
+                  color: CupertinoColors.tertiaryLabel.resolveFrom(context),
+                ),
+          ],
+        ),
       ),
     );
   }
@@ -375,7 +393,6 @@ class _SheetHeader extends StatelessWidget {
 
 class _MenuPage extends StatelessWidget {
   const _MenuPage({
-    super.key,
     required this.email,
     required this.householdName,
     required this.isAdmin,
@@ -388,6 +405,7 @@ class _MenuPage extends StatelessWidget {
   final String email;
   final String householdName;
   final bool isAdmin;
+
   final VoidCallback onAccount;
   final VoidCallback onMyInfo;
   final VoidCallback? onInvitePartner;
@@ -396,78 +414,49 @@ class _MenuPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      key: key,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: CircleAvatar(
-            child: IconTheme(
-              data: IconThemeData(
-                color: Theme.of(context).colorScheme.onPrimary,
-              ),
-              child: const PixelIcon(
-                'assets/icons/ui/account.svg',
-                semanticLabel: 'Account',
-                size: 20,
-              ),
-            ),
-          ),
-          title: Text(email),
-          subtitle: Text(householdName),
-        ),
-        const SizedBox(height: 8),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
+        _AccountHeaderRow(email: email, householdName: householdName),
+        const SizedBox(height: 10),
+        const _SheetDivider(),
+        _SheetRow(
           leading: const PixelIcon(
             'assets/icons/ui/settings.svg',
             semanticLabel: 'Account & household',
           ),
-          title: const Text('Account & household'),
-          trailing: const PixelIcon(
-            'assets/icons/ui/chevron_right.svg',
-            semanticLabel: 'Open',
-            size: 20,
-          ),
+          title: 'Account & household',
           onTap: onAccount,
         ),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
+        const _SheetDivider(),
+        _SheetRow(
           leading: const PixelIcon(
             'assets/icons/ui/badge.svg',
             semanticLabel: 'My info',
           ),
-          title: const Text('My info'),
-          trailing: const PixelIcon(
-            'assets/icons/ui/chevron_right.svg',
-            semanticLabel: 'Open',
-            size: 20,
-          ),
+          title: 'My info',
           onTap: onMyInfo,
         ),
-        if (isAdmin)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
+        if (isAdmin) ...[
+          const _SheetDivider(),
+          _SheetRow(
             leading: const PixelIcon(
               'assets/icons/ui/person_add.svg',
               semanticLabel: 'Invite partner',
             ),
-            title: const Text('Invite partner'),
-            trailing: const PixelIcon(
-              'assets/icons/ui/chevron_right.svg',
-              semanticLabel: 'Open',
-              size: 20,
-            ),
+            title: 'Invite partner',
             onTap: onInvitePartner,
           ),
-        const Divider(),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
+        ],
+        const SizedBox(height: 10),
+        const _SheetDivider(),
+        _SheetRow(
           leading: const PixelIcon(
             'assets/icons/ui/logout.svg',
             semanticLabel: 'Sign out',
           ),
-          title: const Text('Sign out'),
+          title: 'Sign out',
+          isDestructive: true,
+          trailing: const SizedBox.shrink(),
           onTap: onSignOut,
         ),
       ],
@@ -476,156 +465,91 @@ class _MenuPage extends StatelessWidget {
 }
 
 class _AccountPage extends StatelessWidget {
-  const _AccountPage({super.key, required this.email, required this.household});
+  const _AccountPage({required this.householdName});
 
-  final String email;
-  final ActiveHouseholdController household;
+  final String householdName;
 
   @override
   Widget build(BuildContext context) {
+    final household = PennyPopScope.householdOf(context);
     final active = household.active;
 
     return ListView(
-      key: key,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        const Text(
-          'Account',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        _AccountHeaderRow(
+          email: AuthService.instance.currentUser?.email ?? 'Not signed in',
+          householdName: householdName,
         ),
-        const SizedBox(height: 12),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Email'),
-          subtitle: Text(email),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          'Household',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 12),
-        if (household.isLoading)
-          const ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Loading household...'),
-            subtitle: LinearProgressIndicator(),
-          )
-        else if (household.error != null)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Household couldn’t load'),
-            subtitle: const Text('Tap to retry'),
-            trailing: const PixelIcon(
-              'assets/icons/ui/refresh.svg',
-              semanticLabel: 'Retry',
-              size: 20,
-            ),
-            onTap: () => household.refresh(),
-          )
-        else
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Current household'),
-            subtitle: Text(active?.name ?? 'Not set'),
+        const SizedBox(height: 10),
+        const _SheetDivider(),
+        _SheetRow(
+          leading: const PixelIcon(
+            'assets/icons/ui/sync.svg',
+            semanticLabel: 'Sync',
           ),
-        const SizedBox(height: 12),
-        ExpansionTile(
-          tilePadding: EdgeInsets.zero,
-          title: const Text('Troubleshooting'),
-          subtitle: const Text('Only needed for support / setup issues'),
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Sync membership'),
-              subtitle: const Text('Use if you were just added to a household'),
-              trailing: const PixelIcon(
-                'assets/icons/ui/sync.svg',
-                semanticLabel: 'Sync',
-                size: 20,
-              ),
-              onTap: () => household.refresh(),
-            ),
-            if (active != null) ...[
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Household ID'),
-                subtitle: Text(active.id),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Permissions'),
-                subtitle: Text(active.role == 'admin' ? 'Admin' : 'Member'),
-              ),
-            ],
-          ],
+          title: 'Sync membership',
+          onTap: household.refresh,
+          trailing: household.isLoading
+              ? const CupertinoActivityIndicator()
+              : const Icon(CupertinoIcons.chevron_right, size: 18),
         ),
+        if (active != null) ...[
+          const _SheetDivider(),
+          _SheetRow(
+            leading: const PixelIcon(
+              'assets/icons/ui/badge.svg',
+              semanticLabel: 'Role',
+            ),
+            title: 'Role: ${active.role}',
+            onTap: null,
+            trailing: const SizedBox.shrink(),
+          ),
+        ],
       ],
     );
   }
 }
 
 class _MyInfoPage extends StatelessWidget {
-  const _MyInfoPage({
-    super.key,
-    required this.userId,
-    required this.email,
-    required this.parentContext,
-  });
+  const _MyInfoPage({required this.userId, required this.email});
 
   final String? userId;
   final String? email;
-  final BuildContext parentContext;
 
   @override
   Widget build(BuildContext context) {
     Future<void> copy(String value, String label) async {
       await Clipboard.setData(ClipboardData(text: value));
-      if (!parentContext.mounted) return;
-      ScaffoldMessenger.of(
-        parentContext,
-      ).showSnackBar(SnackBar(content: Text('$label copied')));
+      if (!context.mounted) return;
+      showGlassToast(context, '$label copied');
     }
 
     final displayUserId = userId ?? 'Not signed in';
     final displayEmail = email ?? 'Not signed in';
 
     return ListView(
-      key: key,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        const Text(
-          'Share these with your partner/admin if needed.',
-          style: TextStyle(height: 1.3),
-        ),
-        const SizedBox(height: 16),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('User ID'),
-          subtitle: Text(displayUserId),
-          trailing: IconButton(
-            onPressed: userId == null
-                ? null
-                : () => copy(displayUserId, 'User ID'),
-            icon: const PixelIcon(
+        const Text('Share these with your partner/admin if needed.'),
+        const SizedBox(height: 10),
+        const _SheetDivider(),
+        _SheetRow(
+          leading: const PixelIcon(
               'assets/icons/ui/copy.svg',
               semanticLabel: 'Copy',
-            ),
-            tooltip: 'Copy',
           ),
+          title: 'Copy user ID',
+          onTap: userId == null ? null : () => copy(displayUserId, 'User ID'),
         ),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Email'),
-          subtitle: Text(displayEmail),
-          trailing: IconButton(
-            onPressed: email == null ? null : () => copy(displayEmail, 'Email'),
-            icon: const PixelIcon(
+        const _SheetDivider(),
+        _SheetRow(
+          leading: const PixelIcon(
               'assets/icons/ui/copy.svg',
               semanticLabel: 'Copy',
-            ),
-            tooltip: 'Copy',
           ),
+          title: 'Copy email',
+          onTap: email == null ? null : () => copy(displayEmail, 'Email'),
         ),
       ],
     );
@@ -634,11 +558,9 @@ class _MyInfoPage extends StatelessWidget {
 
 class _InvitePartnerPage extends StatelessWidget {
   const _InvitePartnerPage({
-    super.key,
-    required this.parentContext,
+    required this.isAdmin,
     required this.householdId,
     required this.householdName,
-    required this.isAdmin,
     required this.emailController,
     required this.saving,
     required this.lastAddedEmail,
@@ -647,10 +569,9 @@ class _InvitePartnerPage extends StatelessWidget {
     required this.onSubmit,
   });
 
-  final BuildContext parentContext;
+  final bool isAdmin;
   final String? householdId;
   final String? householdName;
-  final bool isAdmin;
 
   final TextEditingController emailController;
   final bool saving;
@@ -658,7 +579,8 @@ class _InvitePartnerPage extends StatelessWidget {
   final String? lastAddedUserId;
 
   final VoidCallback onChanged;
-  final Future<void> Function(String householdId, String email) onSubmit;
+  final Future<void> Function({required String householdId, required String email})
+      onSubmit;
 
   @override
   Widget build(BuildContext context) {
@@ -667,96 +589,46 @@ class _InvitePartnerPage extends StatelessWidget {
         isAdmin && householdId != null && !saving && emailText.isNotEmpty;
 
     return ListView(
-      key: key,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
         const Text(
           'Your partner must sign in once first, then enter their email here.',
           style: TextStyle(height: 1.3),
         ),
         if (lastAddedEmail != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(top: 2),
-                  child: PixelIcon(
-                    'assets/icons/ui/check_circle.svg',
-                    semanticLabel: 'Success',
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
+          const SizedBox(height: 10),
+          Text(
                     lastAddedUserId == null
-                        ? 'Added $lastAddedEmail. They may need to open Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.'
-                        : 'Added $lastAddedEmail (user: $lastAddedUserId). They may need to open Account & household → Troubleshooting → Sync membership (or restart the app) to see the shared household.',
-                    style: const TextStyle(height: 1.3),
-                  ),
-                ),
-              ],
-            ),
+                ? 'Added $lastAddedEmail.'
+                : 'Added $lastAddedEmail (user: $lastAddedUserId).',
           ),
         ],
-        const SizedBox(height: 12),
-        if (householdId == null)
-          const ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Household not loaded yet'),
-            subtitle: Text('Go back and try again in a moment.'),
-          )
-        else ...[
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Household'),
-            subtitle: Text('${householdName ?? ''}\n$householdId'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
+        const SizedBox(height: 10),
+        Text(
+          householdId == null
+              ? 'Household not loaded yet.'
+              : 'Household: ${householdName ?? ''}',
+        ),
+        const SizedBox(height: 10),
+        CupertinoTextField(
             controller: emailController,
             keyboardType: TextInputType.emailAddress,
             autofillHints: const [AutofillHints.email],
             onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-              labelText: 'Partner email',
-              hintText: 'partner@gmail.com',
-              border: OutlineInputBorder(),
-            ),
+          placeholder: 'partner@gmail.com',
           ),
           const SizedBox(height: 12),
-          FilledButton(
+        CupertinoButton.filled(
             onPressed: !canSubmit
                 ? null
-                : () => onSubmit(householdId!, emailText),
+              : () => onSubmit(householdId: householdId!, email: emailText),
             child: saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+              ? const CupertinoActivityIndicator()
                 : const Text('Invite partner'),
           ),
-          if (!isAdmin) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Only admins can add members.',
-              style: TextStyle(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.7),
-              ),
-            ),
-          ],
-        ],
       ],
     );
   }
 }
+
+

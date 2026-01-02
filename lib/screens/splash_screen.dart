@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -60,8 +60,8 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: SafeArea(
+    return const CupertinoPageScaffold(
+      child: SafeArea(
         child: Center(
           child: BrandingCycleAnimation(),
         ),

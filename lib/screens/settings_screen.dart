@@ -1,9 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:go_router/go_router.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
 import 'package:penny_pop_app/auth/auth_service.dart';
+import 'package:penny_pop_app/design/glass/glass.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -42,9 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await AuthService.instance.signOut(alsoSignOutGoogle: true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Sign out failed: $e')));
+      showGlassToast(context, 'Sign out failed: $e');
     } finally {
       if (mounted) setState(() => _signingOut = false);
     }
@@ -57,127 +56,105 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final active = household.active;
     final isAdmin = active?.role == 'admin';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: RefreshIndicator(
-        onRefresh: household.refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            const Text(
-              'Account',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Email'),
-              subtitle: Text(email ?? 'Not signed in'),
-            ),
-            const SizedBox(height: 8),
-            FilledButton(
-              onPressed: email == null || _signingOut ? null : _signOut,
-              child: _signingOut
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Sign out'),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Household',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            if (household.isLoading)
-              const ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Loading household...'),
-                subtitle: LinearProgressIndicator(),
-              )
-            else if (household.error != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Household couldn’t load'),
-                subtitle: const Text('Pull down to retry'),
-                trailing: IconButton(
-                  onPressed: () => household.refresh(),
-                  icon: const PixelIcon(
-                    'assets/icons/ui/refresh.svg',
-                    semanticLabel: 'Retry',
-                  ),
-                  tooltip: 'Retry',
+    return CupertinoPageScaffold(
+      navigationBar: const CupertinoNavigationBar(middle: Text('Settings')),
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: <Widget>[
+          CupertinoSliverRefreshControl(onRefresh: household.refresh),
+          SliverToBoxAdapter(
+            child: CupertinoListSection.insetGrouped(
+              header: const Text('Account'),
+              children: <Widget>[
+                CupertinoListTile(
+                  title: const Text('Email'),
+                  additionalInfo: Text(email ?? 'Not signed in'),
                 ),
-              )
-            else
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Current household'),
-                subtitle: Text(active?.name ?? 'Not set'),
-              ),
-            if (isAdmin) ...[
-              const SizedBox(height: 8),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Invite partner'),
-                subtitle: const Text('Add a member by email'),
-                  trailing: const PixelIcon(
-                    'assets/icons/ui/chevron_right.svg',
-                    semanticLabel: 'Open',
-                    size: 20,
+                CupertinoListTile(
+                  title: const Text('Sign out'),
+                  leading: const PixelIcon(
+                    'assets/icons/ui/logout.svg',
+                    semanticLabel: 'Sign out',
                   ),
-                onTap: () => context.push('/settings/add-partner'),
-              ),
-            ],
-            const SizedBox(height: 20),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Troubleshooting'),
-              subtitle: const Text('Only needed for support / setup issues'),
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
+                  trailing: _signingOut
+                      ? const CupertinoActivityIndicator()
+                      : const Icon(CupertinoIcons.chevron_right, size: 18),
+                  onTap: email == null || _signingOut ? null : _signOut,
+                ),
+              ],
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: CupertinoListSection.insetGrouped(
+              header: const Text('Household'),
+              children: <Widget>[
+                if (household.isLoading)
+                  const CupertinoListTile(
+                    title: Text('Loading household...'),
+                    trailing: CupertinoActivityIndicator(),
+                  )
+                else if (household.error != null)
+                  CupertinoListTile(
+                    title: const Text('Household couldn’t load'),
+                    additionalInfo: const Text('Tap to retry'),
+                    trailing: const PixelIcon(
+                      'assets/icons/ui/refresh.svg',
+                      semanticLabel: 'Retry',
+                      size: 20,
+                    ),
+                    onTap: () => household.refresh(),
+                  )
+                else
+                  CupertinoListTile(
+                    title: const Text('Current household'),
+                    additionalInfo: Text(active?.name ?? 'Not set'),
+                  ),
+                if (isAdmin)
+                  CupertinoListTile(
+                    title: const Text('Invite partner'),
+                    additionalInfo: const Text('Add a member by email'),
+                    trailing: const Icon(CupertinoIcons.chevron_right, size: 18),
+                    onTap: () => context.push('/settings/add-partner'),
+                  ),
+              ],
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: CupertinoListSection.insetGrouped(
+              header: const Text('Troubleshooting'),
+              footer: const Text('Only needed for support / setup issues.'),
+              children: <Widget>[
+                CupertinoListTile(
                   title: const Text('My info'),
-                  subtitle: const Text('User ID + email (copyable)'),
-                  trailing: const PixelIcon(
-                    'assets/icons/ui/chevron_right.svg',
-                    semanticLabel: 'Open',
-                    size: 20,
-                  ),
+                  additionalInfo: const Text('User ID + email (copyable)'),
+                  trailing: const Icon(CupertinoIcons.chevron_right, size: 18),
                   onTap: () => context.push('/settings/me'),
                 ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
+                CupertinoListTile(
                   title: const Text('Sync membership'),
-                  subtitle: const Text(
-                    'Use if you were just added to a household',
-                  ),
+                  additionalInfo: const Text('Use if you were just added'),
                   trailing: const PixelIcon(
                     'assets/icons/ui/sync.svg',
                     semanticLabel: 'Sync',
                     size: 20,
                   ),
-                  onTap: () => household.refresh(),
+                  onTap: household.refresh,
                 ),
-                if (active != null) ...[
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
+                if (active != null) ...<Widget>[
+                  CupertinoListTile(
                     title: const Text('Household ID'),
-                    subtitle: Text(active.id),
+                    additionalInfo: Text(active.id),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
+                  CupertinoListTile(
                     title: const Text('Permissions'),
-                    subtitle: Text(active.role == 'admin' ? 'Admin' : 'Member'),
+                    additionalInfo: Text(active.role == 'admin' ? 'Admin' : 'Member'),
                   ),
                 ],
               ],
             ),
-          ],
-        ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
       ),
     );
   }

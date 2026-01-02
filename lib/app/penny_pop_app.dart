@@ -1,8 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
+import 'package:penny_pop_app/design/glass/glass_platform_accessibility.dart';
 import 'package:penny_pop_app/households/household_service.dart';
 import 'package:penny_pop_app/routing/app_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -36,25 +38,30 @@ class _PennyPopAppState extends State<PennyPopApp> {
 
   @override
   Widget build(BuildContext context) {
-    const seedColor = Colors.deepPurple;
-    final lightColorScheme = ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: Brightness.light,
-    );
-    final darkColorScheme = ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: Brightness.dark,
-    );
-
     return PennyPopScope(
       household: _householdController,
-      child: MaterialApp.router(
-        debugShowCheckedModeBanner: false,
-        title: 'Penny Pop',
-        theme: ThemeData(colorScheme: lightColorScheme, useMaterial3: true),
-        darkTheme: ThemeData(colorScheme: darkColorScheme, useMaterial3: true),
-        themeMode: ThemeMode.system,
-        routerConfig: _router,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: GlassPlatformAccessibility.reduceTransparencyEnabled,
+        builder: (context, reduceTransparencyEnabled, _) {
+          return CupertinoApp.router(
+            debugShowCheckedModeBanner: false,
+            title: 'Penny Pop',
+            theme: const CupertinoThemeData(
+              primaryColor: CupertinoColors.systemPurple,
+              // Let brightness follow the system; glass tokens resolve from
+              // CupertinoTheme/MediaQuery.
+            ),
+            localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: const <Locale>[
+              Locale('en', 'US'),
+            ],
+            routerConfig: _router,
+          );
+        },
       ),
     );
   }

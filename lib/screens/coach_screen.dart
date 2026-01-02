@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
 import 'package:penny_pop_app/widgets/user_menu_sheet.dart';
 
@@ -7,21 +7,19 @@ class CoachScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Guide'),
-        actions: [
-          IconButton(
-            tooltip: 'Account',
-            icon: const PixelIcon(
-              'assets/icons/ui/account.svg',
-              semanticLabel: 'Account',
-            ),
-            onPressed: () => showUserMenuSheet(context),
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('Guide'),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: () => showUserMenuSheet(context),
+          child: const PixelIcon(
+            'assets/icons/ui/account.svg',
+            semanticLabel: 'Account',
           ),
-        ],
+        ),
       ),
-      body: const Center(child: Text('Guide Screen')),
+      child: const Center(child: Text('Guide Screen')),
     );
   }
 }

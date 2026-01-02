@@ -1,13 +1,10 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:go_router/go_router.dart';
 import 'package:penny_pop_app/screens/activity_screen.dart';
-import 'package:penny_pop_app/screens/add_partner_screen.dart';
 import 'package:penny_pop_app/screens/coach_screen.dart';
 import 'package:penny_pop_app/screens/home_screen.dart';
 import 'package:penny_pop_app/screens/login_screen.dart';
-import 'package:penny_pop_app/screens/me_screen.dart';
 import 'package:penny_pop_app/screens/pods_screen.dart';
-import 'package:penny_pop_app/screens/settings_screen.dart';
 import 'package:penny_pop_app/screens/splash_screen.dart';
 import 'package:penny_pop_app/shell/app_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,17 +32,6 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/coach', redirect: (context, state) => '/guide'),
-      GoRoute(
-        path: '/settings',
-        builder: (context, state) => const SettingsScreen(),
-        routes: <RouteBase>[
-          GoRoute(path: 'me', builder: (context, state) => const MeScreen()),
-          GoRoute(
-            path: 'add-partner',
-            builder: (context, state) => const AddPartnerScreen(),
-          ),
-        ],
-      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return AppShell(navigationShell: navigationShell);
@@ -55,7 +41,10 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
             routes: <RouteBase>[
               GoRoute(
                 path: '/',
-                builder: (context, state) => const HomeScreen(),
+                pageBuilder: (context, state) => NoTransitionPage<void>(
+                  key: state.pageKey,
+                  child: const HomeScreen(),
+                ),
               ),
             ],
           ),
@@ -63,7 +52,10 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
             routes: <RouteBase>[
               GoRoute(
                 path: '/pods',
-                builder: (context, state) => const PodsScreen(),
+                pageBuilder: (context, state) => NoTransitionPage<void>(
+                  key: state.pageKey,
+                  child: const PodsScreen(),
+                ),
               ),
             ],
           ),
@@ -71,7 +63,10 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
             routes: <RouteBase>[
               GoRoute(
                 path: '/guide',
-                builder: (context, state) => const CoachScreen(),
+                pageBuilder: (context, state) => NoTransitionPage<void>(
+                  key: state.pageKey,
+                  child: const CoachScreen(),
+                ),
               ),
             ],
           ),
@@ -79,7 +74,10 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
             routes: <RouteBase>[
               GoRoute(
                 path: '/activity',
-                builder: (context, state) => const ActivityScreen(),
+                pageBuilder: (context, state) => NoTransitionPage<void>(
+                  key: state.pageKey,
+                  child: const ActivityScreen(),
+                ),
               ),
             ],
           ),

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:penny_pop_app/app/penny_pop_app.dart';
 import 'package:penny_pop_app/config/env.dart';
+import 'package:penny_pop_app/design/glass/glass_platform_accessibility.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await GlassPlatformAccessibility.init();
 
   final supabaseUrl = Env.supabaseUrl;
   final supabaseKey = Env.supabaseKey;

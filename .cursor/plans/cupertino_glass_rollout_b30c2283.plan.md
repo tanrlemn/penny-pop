@@ -4,26 +4,26 @@ overview: Convert the app to a Cupertino-first iOS UI and introduce a small reus
 todos:
   - id: add-glass-design-system
     content: Create `lib/design/glass/` tokens + `GlassSurface` (blur+tint+hairline border) with reduce-transparency + reduce-motion fallbacks, plus presets (bar/card/sheet) and an adaptive helper.
-    status: pending
+    status: completed
   - id: switch-to-cupertino-app
     content: Update `PennyPopApp` to use `CupertinoApp.router` and set `CupertinoThemeData` (light/dark) aligned to glass tokens.
-    status: pending
+    status: completed
     dependencies:
       - add-glass-design-system
   - id: glass-shell-tabbar
     content: Refactor `AppShell` to a Cupertino-friendly layout and implement a glass bottom tab bar driving `StatefulNavigationShell`; tune `PixelNavIcon` coloring for selected/unselected states.
-    status: pending
+    status: completed
     dependencies:
       - add-glass-design-system
       - switch-to-cupertino-app
   - id: cupertino-pages-router
     content: Update `createAppRouter` routes to use `pageBuilder` with Cupertino page transitions for the shell and the 1–2 most common push routes first; expand to the rest once the frame is stable.
-    status: pending
+    status: completed
     dependencies:
       - switch-to-cupertino-app
   - id: convert-screens-overlays
     content: Convert key screens/overlays from Material to Cupertino-first (login/splash + tab screens as needed + `user_menu_sheet.dart`), replacing Material sheets/snackbars with Cupertino/glass equivalents.
-    status: pending
+    status: completed
     dependencies:
       - glass-shell-tabbar
 ---
