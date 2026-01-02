@@ -4,26 +4,26 @@ overview: Replace the default counter template with a 5-tab app shell (Home/Pods
 todos:
   - id: add-go-router
     content: Add go_router dependency to pubspec.yaml and fetch packages
-    status: in_progress
+    status: completed
   - id: implement-router-shell
     content: Create app router with StatefulShellRoute.indexedStack and an AppShell with BottomNavigationBar switching 5 branches
-    status: pending
+    status: completed
     dependencies:
       - add-go-router
   - id: add-placeholder-screens
     content: Add 5 placeholder screen widgets (Home/Pods/Coach/Activity/Settings) and wire them to the router paths
-    status: pending
+    status: completed
     dependencies:
       - implement-router-shell
   - id: wire-main-app
     content: Replace counter template in lib/main.dart with PennyPopApp + MaterialApp.router
-    status: pending
+    status: completed
     dependencies:
       - implement-router-shell
       - add-placeholder-screens
   - id: update-widget-test
     content: Update widget_test.dart to validate tab switching / placeholder text instead of counter increment
-    status: pending
+    status: completed
     dependencies:
       - wire-main-app
 ---
