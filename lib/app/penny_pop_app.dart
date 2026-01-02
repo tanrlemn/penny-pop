@@ -45,7 +45,7 @@ class _PennyPopAppState extends State<PennyPopApp> {
         builder: (context, reduceTransparencyEnabled, _) {
           return CupertinoApp.router(
             debugShowCheckedModeBanner: false,
-            title: 'Penny Pop',
+            title: 'Penny Pixel Pop',
             theme: const CupertinoThemeData(
               primaryColor: CupertinoColors.systemPurple,
               // Let brightness follow the system; glass tokens resolve from

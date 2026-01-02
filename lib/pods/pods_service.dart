@@ -11,7 +11,7 @@ class PodsService {
     required String householdId,
   }) async {
     var query = _supabase.from('pods').select(
-      'id,household_id,sequence_account_id,name,is_active,last_seen_at,balance_amount_in_cents,balance_error,pod_settings(category,notes)',
+      'id,household_id,sequence_account_id,name,is_active,last_seen_at,balance_amount_in_cents,balance_error,pod_settings(category,notes,budgeted_amount_in_cents)',
     ).eq('household_id', householdId);
 
     // Active only by default for the app UI. Inactive pods are retained for history.
@@ -66,11 +66,27 @@ class PodsService {
     required String podId,
     String? category,
     String? notes,
+    int? budgetedAmountCents,
   }) async {
     await _supabase.from('pod_settings').upsert({
       'pod_id': podId,
       'category': category,
       'notes': notes,
+      'budgeted_amount_in_cents': budgetedAmountCents,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
+  /// Upsert budget/section without touching notes (keeps “fast edit” safe).
+  Future<void> upsertPodBudget({
+    required String podId,
+    String? category,
+    int? budgetedAmountCents,
+  }) async {
+    await _supabase.from('pod_settings').upsert({
+      'pod_id': podId,
+      'category': category,
+      'budgeted_amount_in_cents': budgetedAmountCents,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
   }

@@ -4,31 +4,31 @@ overview: "Rename Pods to Envelopes and turn the Pods list into an envelope-budg
 todos:
   - id: db-budgeted-income
     content: "Add migration: add `pod_settings.budgeted_amount_in_cents` and extend category check to include `Income`."
-    status: pending
+    status: completed
   - id: edge-sync-income-sources
     content: Update Edge Function `sync-pods` to import Sequence `Income Source` accounts and create default `pod_settings(category=Income)` when missing.
-    status: pending
+    status: completed
     dependencies:
       - db-budgeted-income
   - id: flutter-models-service
     content: Extend `PodSettings` + `PodsService` to read/write `budgeted_amount_in_cents` via `pod_settings` join/upsert.
-    status: pending
+    status: completed
     dependencies:
       - db-budgeted-income
   - id: ui-envelopes-summary-sections
     content: "Update `PodsScreen` UI: rename to Envelopes, add top summary, render Income + expense sections with section totals and per-row Needs/+ indicators."
-    status: pending
+    status: completed
     dependencies:
       - flutter-models-service
       - edge-sync-income-sources
   - id: ui-fast-edit-budgeted
     content: Implement row tap → fast budgeted edit sheet (budgeted + optional section picker), save via `upsertPodSettings`; keep balance read-only.
-    status: pending
+    status: completed
     dependencies:
       - flutter-models-service
   - id: rename-tab-label
     content: Rename bottom tab label from Pods → Envelopes and update nav title accordingly.
-    status: pending
+    status: completed
 ---
 
 # Envelopes (Budget) screen refresh

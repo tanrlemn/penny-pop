@@ -26,6 +26,14 @@ import UIKit
         binaryMessenger: controller.binaryMessenger
       )
       eventChannel.setStreamHandler(ReduceTransparencyStreamHandler())
+
+      // Register iOS platform view used by `IosSystemMaterialBackdrop` (Dart).
+      if let registrar = self.registrar(forPlugin: "penny_pop.system_material") {
+        registrar.register(
+          SystemMaterialPlatformViewFactory(messenger: registrar.messenger()),
+          withId: "penny_pop/system_material"
+        )
+      }
     }
 
     GeneratedPluginRegistrant.register(with: self)

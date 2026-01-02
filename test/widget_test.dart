@@ -31,7 +31,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1500));
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome to Penny Pop'), findsOneWidget);
+    expect(find.text('Welcome to Penny Pixel Pop'), findsOneWidget);
     expect(find.text('Continue with Google'), findsOneWidget);
 
     final decorated =

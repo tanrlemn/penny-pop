@@ -62,7 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Welcome to Penny Pop',
+                      'Welcome to Penny Pixel Pop',
                       style: textTheme.navTitleTextStyle.copyWith(
                         fontWeight: FontWeight.w700,
                         fontSize: 22,

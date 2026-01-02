@@ -1,16 +1,27 @@
 class PodSettings {
-  const PodSettings({this.category, this.notes});
+  const PodSettings({this.category, this.notes, this.budgetedAmountCents});
 
   final String? category;
   final String? notes;
+  final int? budgetedAmountCents;
 
   static PodSettings? fromJson(dynamic json) {
     if (json == null) return null;
     if (json is Map) {
       final map = json.cast<String, dynamic>();
+      final b = map['budgeted_amount_in_cents'];
+      int? budgetedCents;
+      if (b is int) {
+        budgetedCents = b;
+      } else if (b is num) {
+        budgetedCents = b.toInt();
+      } else if (b != null) {
+        budgetedCents = int.tryParse(b.toString());
+      }
       return PodSettings(
         category: map['category']?.toString(),
         notes: map['notes']?.toString(),
+        budgetedAmountCents: budgetedCents,
       );
     }
     return null;

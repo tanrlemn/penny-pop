@@ -56,6 +56,12 @@ function isPodType(typeValue: string | null): boolean {
   return t === "pod" || t.includes("pod");
 }
 
+function isIncomeSourceType(typeValue: string | null): boolean {
+  if (!typeValue) return false;
+  const t = typeValue.toLowerCase();
+  return t === "income source" || t.includes("income");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -296,9 +302,14 @@ serve(async (req) => {
       return String(e);
     };
 
-    const podRows = accounts
-      .filter((a) => isPodType(getTypeValue(a)))
+    const importedRows = accounts
+      .filter((a) => {
+        const t = getTypeValue(a);
+        return isPodType(t) || isIncomeSourceType(t);
+      })
       .map((a) => {
+        const typeValue = getTypeValue(a);
+        const isIncome = isIncomeSourceType(typeValue);
         const sequenceAccountId = pickString(a, [
           "id",
           "accountId",
@@ -321,17 +332,30 @@ serve(async (req) => {
           balance_amount_in_cents: balanceCents,
           balance_error: balanceError,
           balance_updated_at: balanceUpdatedAt,
+          __is_income: isIncome,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
     // Upsert seen pods (reactivates any that were previously inactive).
     let upsertedIds: Array<{ id: string }> = [];
-    if (podRows.length > 0) {
+    if (importedRows.length > 0) {
+      // Keep a local map of which Sequence accounts are income sources; used after
+      // we get DB IDs back from the upsert.
+      const incomeBySequenceId = new Map<string, boolean>();
+      for (const r of importedRows) {
+        incomeBySequenceId.set(r.sequence_account_id, r.__is_income === true);
+      }
+
+      const rowsToUpsert = importedRows.map((r) => {
+        const { __is_income: _ignored, ...rest } = r;
+        return rest;
+      });
+
       const { data: upserted, error: upsertError } = await supabaseAdmin
         .from("pods")
-        .upsert(podRows, { onConflict: "household_id,sequence_account_id" })
-        .select("id");
+        .upsert(rowsToUpsert, { onConflict: "household_id,sequence_account_id" })
+        .select("id,sequence_account_id");
 
       if (upsertError) {
         return jsonResponse(
@@ -340,7 +364,35 @@ serve(async (req) => {
         );
       }
 
-      upsertedIds = upserted ?? [];
+      const upsertedRows = (upserted ?? []) as Array<
+        { id: string; sequence_account_id: string }
+      >;
+      upsertedIds = upsertedRows.map((r) => ({ id: r.id }));
+
+      // Default any Income Source rows into category='Income', but never overwrite
+      // an existing pod_settings row.
+      const incomeSettingsRows = upsertedRows
+        .filter((r) => incomeBySequenceId.get(r.sequence_account_id) === true)
+        .map((r) => ({
+          pod_id: r.id,
+          category: "Income",
+          updated_at: now,
+        }));
+
+      if (incomeSettingsRows.length > 0) {
+        const { error: settingsError } = await supabaseAdmin
+          .from("pod_settings")
+          .upsert(incomeSettingsRows, {
+            onConflict: "pod_id",
+            ignoreDuplicates: true,
+          });
+        if (settingsError) {
+          return jsonResponse(
+            { error: `Default income settings failed: ${settingsError.message}` },
+            { status: 500 },
+          );
+        }
+      }
     }
 
     // Deactivate pods not seen in this sync.
@@ -364,7 +416,7 @@ serve(async (req) => {
       sequenceUrl: usedUrl,
       accountsCount: accounts.length,
       typesSeen: Array.from(typesSeen).slice(0, 20),
-      seenPods: podRows.length,
+      seenPods: importedRows.length,
       upserted: upsertedIds.length,
       deactivated: deactivated?.length ?? 0,
     });

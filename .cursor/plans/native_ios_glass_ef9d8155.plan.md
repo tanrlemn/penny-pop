@@ -4,7 +4,7 @@ overview: Replace the current Flutter-only blur+tint with an iOS-native system m
 todos:
   - id: add-glass-variants
     content: Add `GlassVariant` + route token decisions (tint/blur/border/shadow) through variants.
-    status: pending
+    status: in_progress
   - id: ios-platform-material
     content: Implement iOS `UIVisualEffectView` platform view + Dart wrapper and use it inside `GlassSurface` when blur is enabled.
     status: pending

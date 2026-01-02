@@ -27,8 +27,6 @@ class AppShell extends StatelessWidget {
     final reduceMotion = GlassAdaptive.reduceMotionOf(context);
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final safeBottom = MediaQuery.of(context).padding.bottom;
-
-    const barHeight = 66.0;
     const horizontalInset = 12.0;
     const verticalInset = 10.0;
 
@@ -36,13 +34,30 @@ class AppShell extends StatelessWidget {
       child: Stack(
         children: <Widget>[
           Positioned.fill(
-            child: Padding(
-              padding: EdgeInsets.only(
-                bottom: barHeight + verticalInset + safeBottom,
-              ),
-              child: navigationShell,
-            ),
+            child: navigationShell,
           ),
+          // Cover the iOS home-indicator safe area with a subtle glass underlay
+          // so we don't get a solid white strip at the very bottom.
+          if (safeBottom > 0)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: SizedBox(
+                  height: safeBottom,
+                  child: GlassSurface(
+                    variant: GlassVariant.bar,
+                    borderRadius: BorderRadius.zero,
+                    padding: EdgeInsets.zero,
+                    borderWidth: 0,
+                    borderColor: Color(0x00000000),
+                    shadows: <BoxShadow>[],
+                    child: SizedBox.expand(),
+                  ),
+                ),
+              ),
+            ),
           if (unauthorized)
             const Positioned.fill(
               child: _NotAuthorizedOverlay(),
@@ -256,7 +271,7 @@ class _GlassBottomTabBar extends StatelessWidget {
                   ),
                   tab(
                     index: 1,
-                    label: 'Pods',
+                    label: 'Envelopes',
                     assetPath: 'assets/icons/nav/pods.svg',
                   ),
                   tab(
