@@ -4,20 +4,20 @@ overview: Add minimal household + membership data model in Supabase (migrations 
 todos:
   - id: supabase-cli-init
     content: Add Supabase CLI project folder (`supabase/`) and link it to your Supabase project so migrations can be committed and applied.
-    status: pending
+    status: completed
   - id: db-migrations-households
     content: Create migrations for `profiles`, `households`, `household_members`, RLS policies, and RPC functions `ensure_active_household` + `add_household_member_by_email`.
-    status: pending
+    status: completed
     dependencies:
       - supabase-cli-init
   - id: flutter-household-state
     content: Add a minimal app state + service layer to call `ensure_active_household` after login/session restore and store `active_household_id` + role in memory.
-    status: pending
+    status: completed
     dependencies:
       - db-migrations-households
   - id: settings-household-ui
     content: Update Settings to show household name/id + role; add routes and screens for “My info” and “Add partner” (admin-only).
-    status: pending
+    status: completed
     dependencies:
       - flutter-household-state
 ---

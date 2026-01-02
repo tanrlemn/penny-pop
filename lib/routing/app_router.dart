@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:penny_pop_app/screens/activity_screen.dart';
+import 'package:penny_pop_app/screens/add_partner_screen.dart';
 import 'package:penny_pop_app/screens/coach_screen.dart';
 import 'package:penny_pop_app/screens/home_screen.dart';
 import 'package:penny_pop_app/screens/login_screen.dart';
+import 'package:penny_pop_app/screens/me_screen.dart';
 import 'package:penny_pop_app/screens/pods_screen.dart';
 import 'package:penny_pop_app/screens/settings_screen.dart';
 import 'package:penny_pop_app/screens/splash_screen.dart';
@@ -74,6 +76,16 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
               GoRoute(
                 path: '/settings',
                 builder: (context, state) => const SettingsScreen(),
+                routes: <RouteBase>[
+                  GoRoute(
+                    path: 'me',
+                    builder: (context, state) => const MeScreen(),
+                  ),
+                  GoRoute(
+                    path: 'add-partner',
+                    builder: (context, state) => const AddPartnerScreen(),
+                  ),
+                ],
               ),
             ],
           ),

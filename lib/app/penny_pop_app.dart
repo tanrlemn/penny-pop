@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:penny_pop_app/app/penny_pop_scope.dart';
+import 'package:penny_pop_app/households/household_service.dart';
 import 'package:penny_pop_app/routing/app_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,17 +16,20 @@ class PennyPopApp extends StatefulWidget {
 
 class _PennyPopAppState extends State<PennyPopApp> {
   late final SupabaseAuthNotifier _authNotifier;
+  late final ActiveHouseholdController _householdController;
   late final GoRouter _router;
 
   @override
   void initState() {
     super.initState();
     _authNotifier = SupabaseAuthNotifier();
+    _householdController = ActiveHouseholdController();
     _router = createAppRouter(refreshListenable: _authNotifier);
   }
 
   @override
   void dispose() {
+    _householdController.dispose();
     _authNotifier.dispose();
     super.dispose();
   }
@@ -41,13 +46,16 @@ class _PennyPopAppState extends State<PennyPopApp> {
       brightness: Brightness.dark,
     );
 
-    return MaterialApp.router(
-      debugShowCheckedModeBanner: false,
-      title: 'Penny Pop',
-      theme: ThemeData(colorScheme: lightColorScheme, useMaterial3: true),
-      darkTheme: ThemeData(colorScheme: darkColorScheme, useMaterial3: true),
-      themeMode: ThemeMode.system,
-      routerConfig: _router,
+    return PennyPopScope(
+      household: _householdController,
+      child: MaterialApp.router(
+        debugShowCheckedModeBanner: false,
+        title: 'Penny Pop',
+        theme: ThemeData(colorScheme: lightColorScheme, useMaterial3: true),
+        darkTheme: ThemeData(colorScheme: darkColorScheme, useMaterial3: true),
+        themeMode: ThemeMode.system,
+        routerConfig: _router,
+      ),
     );
   }
 }

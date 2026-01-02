@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:penny_pop_app/app/penny_pop_scope.dart';
 import 'package:penny_pop_app/auth/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -50,6 +52,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final email = _user?.email;
+    final household = PennyPopScope.householdOf(context);
+    final active = household.active;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -66,6 +70,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Email'),
             subtitle: Text(email ?? 'Not signed in'),
           ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('My info'),
+            subtitle: const Text('User ID + email (copyable)'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/settings/me'),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Household',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          if (household.isLoading)
+            const ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Loading household...'),
+              subtitle: LinearProgressIndicator(),
+            )
+          else if (household.error != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Household failed to load'),
+              subtitle: Text('${household.error}'),
+              trailing: IconButton(
+                onPressed: () => household.refresh(),
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Retry',
+              ),
+            )
+          else ...[
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Household name'),
+              subtitle: Text(active?.name ?? 'Not set'),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Household id'),
+              subtitle: Text(active?.id ?? 'Not set'),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('My role'),
+              subtitle: Text(active?.role ?? 'Not set'),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Refresh household'),
+              subtitle: const Text('Use this after an admin adds you'),
+              trailing: const Icon(Icons.refresh),
+              onTap: () => household.refresh(),
+            ),
+            if (active?.role == 'admin')
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Add partner'),
+                subtitle: const Text('Add a member by email'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push('/settings/add-partner'),
+              ),
+          ],
           const SizedBox(height: 12),
           FilledButton(
             onPressed: email == null || _signingOut ? null : _signOut,
