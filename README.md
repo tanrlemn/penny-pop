@@ -1,16 +1,50 @@
-# penny_pop_app
+# Penny Pop
 
-A new Flutter project.
+Flutter (iOS) app for Penny Pop.
 
-## Getting Started
+## Requirements
 
-This project is a starting point for a Flutter application.
+- Flutter SDK (matches the repo’s `environment:` constraints in `pubspec.yaml`)
+- Xcode + CocoaPods (for iOS builds)
 
-A few resources to get you started if this is your first Flutter project:
+## Configuration (required)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+This app uses build-time config via `--dart-define` / `--dart-define-from-file`.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Required keys:
+
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+
+### Local setup (recommended)
+
+1. Copy the example file:
+
+```bash
+cp dart_defines.example.json dart_defines.json
+```
+
+2. Fill in `dart_defines.json` with your Supabase values.
+
+3. Run:
+
+```bash
+flutter run --dart-define-from-file=dart_defines.json
+```
+
+## Google Sign-In (iOS)
+
+Google Sign-In is configured via iOS project settings (not Dart env).
+
+Ensure [`ios/Runner/Info.plist`](ios/Runner/Info.plist) contains:
+
+- `GIDClientID` set to your iOS OAuth client id (`...apps.googleusercontent.com`)
+- `CFBundleURLTypes` includes the reversed client id URL scheme (`com.googleusercontent.apps....`)
+
+## Common commands
+
+```bash
+flutter pub get
+flutter analyze
+flutter test
+```

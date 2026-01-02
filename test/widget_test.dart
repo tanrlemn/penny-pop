@@ -1,28 +1,44 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:penny_pop_app/app/penny_pop_app.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
-  testWidgets('Bottom tabs navigate between placeholder screens', (WidgetTester tester) async {
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    // Widget tests don't run through `main()`, so Supabase isn't initialized.
+    // Use dummy values; no network calls are made unless you perform auth/db ops.
+    await Supabase.initialize(
+      url: 'https://example.supabase.co',
+      anonKey: 'test-anon-key',
+    );
+  });
+
+  testWidgets('Login screen uses a dark Google button in dark mode',
+      (WidgetTester tester) async {
+    final binding = TestWidgetsFlutterBinding.ensureInitialized();
+    binding.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    addTearDown(() {
+      binding.platformDispatcher.clearPlatformBrightnessTestValue();
+    });
+
     await tester.pumpWidget(const PennyPopApp());
+    // App starts at /splash and enforces a minimum display duration.
+    await tester.pump(const Duration(milliseconds: 1500));
     await tester.pumpAndSettle();
 
-    expect(find.text('Home Screen'), findsOneWidget);
+    expect(find.text('Welcome to Penny Pop'), findsOneWidget);
+    expect(find.text('Continue with Google'), findsOneWidget);
 
-    await tester.tap(find.text('Pods'));
-    await tester.pumpAndSettle();
-    expect(find.text('Pods Screen'), findsOneWidget);
+    final button = tester.widget<OutlinedButton>(find.byType(OutlinedButton));
+    final background = button.style?.backgroundColor?.resolve(<WidgetState>{});
+    final foreground = button.style?.foregroundColor?.resolve(<WidgetState>{});
 
-    await tester.tap(find.text('Coach'));
-    await tester.pumpAndSettle();
-    expect(find.text('Coach Screen'), findsOneWidget);
-
-    await tester.tap(find.text('Activity'));
-    await tester.pumpAndSettle();
-    expect(find.text('Activity Screen'), findsOneWidget);
-
-    await tester.tap(find.text('Settings'));
-    await tester.pumpAndSettle();
-    expect(find.text('Settings Screen'), findsOneWidget);
+    expect(background, const Color(0xFF131314));
+    expect(foreground, Colors.white);
   });
 }

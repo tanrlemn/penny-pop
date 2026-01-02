@@ -42,3 +42,13 @@ app.*.map.json
 .env
 .env.local
 !.env.example
+
+# iOS generated artifacts
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# Local Flutter/Dart defines (do not commit real keys)
+dart_defines.json

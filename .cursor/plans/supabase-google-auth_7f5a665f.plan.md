@@ -4,25 +4,25 @@ overview: Add Google-only auth with Supabase on iOS, including a minimal login s
 todos:
   - id: supabase-project-provider
     content: Create Supabase project, enable Google provider, and capture URL/anon key + provider credentials (web client ID/secret; allow iOS client ID if Supabase requires it).
-    status: pending
+    status: completed
   - id: google-cloud-oauth
     content: Configure Google OAuth consent + create Web + iOS OAuth clients; add Supabase callback redirect URI to the Web client; capture iOS/web client IDs + reversed client ID.
-    status: pending
+    status: completed
   - id: flutter-deps-init
     content: Add `supabase_flutter` + `google_sign_in`; initialize Supabase in `lib/main.dart` using `--dart-define` config.
-    status: pending
+    status: completed
   - id: router-auth-gate
     content: Refactor router to add `/login` route and auth-based redirect with refresh on Supabase auth state changes.
-    status: pending
+    status: completed
   - id: login-ui
     content: Add `LoginScreen` with single “Continue with Google” button that uses `GoogleSignIn` + `supabase.auth.signInWithIdToken`.
-    status: pending
+    status: completed
   - id: settings-email-signout
     content: Update `SettingsScreen` to show current user email and sign-out (Supabase signOut + optional Google signOut).
-    status: pending
+    status: completed
   - id: ios-url-scheme
     content: Update iOS `Info.plist` to add `CFBundleURLTypes` URL scheme with Google reversed client ID so google_sign_in can return to the app.
-    status: pending
+    status: completed
 ---
 
 # Chunk 2 — Supabase Project + Google-only Auth (iOS)

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_svg/svg.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:penny_pop_app/widgets/branding_cycle_animation.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -53,7 +54,8 @@ class _SplashScreenState extends State<SplashScreen> {
     }
 
     if (!mounted) return;
-    context.go('/');
+    final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
+    context.go(isLoggedIn ? '/' : '/login');
   }
 
   @override
