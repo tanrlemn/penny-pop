@@ -87,8 +87,6 @@ flowchart LR
   PodsUI -->|"Transfers in real life"| IncomePod["Income Pod (existing)"]
 ```
 
-
-
 ## Acceptance criteria
 
 - You can add multiple income sources in the Income section using **“+ New”**.
@@ -100,5 +98,3 @@ flowchart LR
 
 - Migration is additive only.
 - UI keeps legacy behavior if no income sources exist yet.
-
-## Testing

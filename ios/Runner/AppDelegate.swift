@@ -7,10 +7,10 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    if let controller = window?.rootViewController as? FlutterViewController {
+    if let registrar = self.registrar(forPlugin: "penny_pop.system_material") {
       let methodChannel = FlutterMethodChannel(
         name: "penny_pop/accessibility",
-        binaryMessenger: controller.binaryMessenger
+        binaryMessenger: registrar.messenger()
       )
       methodChannel.setMethodCallHandler { call, result in
         switch call.method {
@@ -23,17 +23,15 @@ import UIKit
 
       let eventChannel = FlutterEventChannel(
         name: "penny_pop/accessibility_reduce_transparency",
-        binaryMessenger: controller.binaryMessenger
+        binaryMessenger: registrar.messenger()
       )
       eventChannel.setStreamHandler(ReduceTransparencyStreamHandler())
 
       // Register iOS platform view used by `IosSystemMaterialBackdrop` (Dart).
-      if let registrar = self.registrar(forPlugin: "penny_pop.system_material") {
-        registrar.register(
-          SystemMaterialPlatformViewFactory(messenger: registrar.messenger()),
-          withId: "penny_pop/system_material"
-        )
-      }
+      registrar.register(
+        SystemMaterialPlatformViewFactory(messenger: registrar.messenger()),
+        withId: "penny_pop/system_material"
+      )
     }
 
     GeneratedPluginRegistrant.register(with: self)

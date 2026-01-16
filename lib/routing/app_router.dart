@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:go_router/go_router.dart';
-import 'package:penny_pop_app/screens/coach_screen.dart';
+import 'package:penny_pop_app/overview/route_extras.dart';
+import 'package:penny_pop_app/screens/chat_screen.dart';
 import 'package:penny_pop_app/screens/home_screen.dart';
 import 'package:penny_pop_app/screens/login_screen.dart';
 import 'package:penny_pop_app/screens/pods_screen.dart';
@@ -30,7 +31,8 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
         builder: (context, state) => const SplashScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
-      GoRoute(path: '/coach', redirect: (context, state) => '/guide'),
+      GoRoute(path: '/coach', redirect: (context, state) => '/chat'),
+      GoRoute(path: '/guide', redirect: (context, state) => '/chat'),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return AppShell(navigationShell: navigationShell);
@@ -53,7 +55,10 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
                 path: '/pods',
                 pageBuilder: (context, state) => NoTransitionPage<void>(
                   key: state.pageKey,
-                  child: const PodsScreen(),
+                  child: PodsScreen(
+                    focusTarget:
+                        (state.extra is PodsScreenArgs) ? (state.extra as PodsScreenArgs).focusTarget : null,
+                  ),
                 ),
               ),
             ],
@@ -61,10 +66,14 @@ GoRouter createAppRouter({required Listenable refreshListenable}) {
           StatefulShellBranch(
             routes: <RouteBase>[
               GoRoute(
-                path: '/guide',
+                path: '/chat',
                 pageBuilder: (context, state) => NoTransitionPage<void>(
                   key: state.pageKey,
-                  child: const CoachScreen(),
+                  child: ChatScreen(
+                    initialPrompt: (state.extra is ChatScreenArgs)
+                        ? (state.extra as ChatScreenArgs).initialPrompt
+                        : null,
+                  ),
                 ),
               ),
             ],

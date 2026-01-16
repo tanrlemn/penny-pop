@@ -23,6 +23,8 @@ class AppShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final household = PennyPopScope.householdOf(context);
     final unauthorized = household.error is NotAuthorizedException;
+    final path = GoRouterState.of(context).uri.path;
+    final showTabBar = !path.startsWith('/chat');
 
     final reduceMotion = GlassAdaptive.reduceMotionOf(context);
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
@@ -62,27 +64,28 @@ class AppShell extends StatelessWidget {
             const Positioned.fill(
               child: _NotAuthorizedOverlay(),
             ),
-          Positioned(
-            left: horizontalInset,
-            right: horizontalInset,
-            bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: AnimatedPadding(
-                padding: EdgeInsets.only(
-                  bottom: keyboardInset > 0 ? keyboardInset : verticalInset,
-                ),
-                duration: reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                child: _GlassBottomTabBar(
-                  currentIndex: navigationShell.currentIndex,
-                  onTap: _onTap,
+          if (showTabBar)
+            Positioned(
+              left: horizontalInset,
+              right: horizontalInset,
+              bottom: 0,
+              child: SafeArea(
+                top: false,
+                child: AnimatedPadding(
+                  padding: EdgeInsets.only(
+                    bottom: keyboardInset > 0 ? keyboardInset : verticalInset,
+                  ),
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: _GlassBottomTabBar(
+                    currentIndex: navigationShell.currentIndex,
+                    onTap: _onTap,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -276,7 +279,7 @@ class _GlassBottomTabBar extends StatelessWidget {
                   ),
                   tab(
                     index: 2,
-                    label: 'Guide',
+                    label: 'Chat',
                     assetPath: 'assets/icons/nav/guide.svg',
                   ),
                 ],

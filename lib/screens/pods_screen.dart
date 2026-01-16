@@ -1,21 +1,29 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
 import 'package:penny_pop_app/design/glass/glass.dart';
 import 'package:penny_pop_app/income/income_models.dart';
 import 'package:penny_pop_app/income/income_service.dart';
+import 'package:penny_pop_app/overview/route_extras.dart';
 import 'package:penny_pop_app/pods/pod_models.dart';
+import 'package:penny_pop_app/pods/pods_refresh_bus.dart';
 import 'package:penny_pop_app/pods/pods_service.dart';
 import 'package:penny_pop_app/widgets/pixel_icon.dart';
 import 'package:penny_pop_app/widgets/user_menu_sheet.dart';
 
 class PodsScreen extends StatefulWidget {
-  const PodsScreen({super.key});
+  const PodsScreen({super.key, this.focusTarget});
+
+  final PodsFocusTarget? focusTarget;
 
   @override
   State<PodsScreen> createState() => _PodsScreenState();
 }
 
 class _PodsScreenState extends State<PodsScreen> {
+  static const bool _enableSearch = false;
+
   final PodsService _service = PodsService();
   final IncomeSourcesService _incomeService = IncomeSourcesService();
 
@@ -27,24 +35,32 @@ class _PodsScreenState extends State<PodsScreen> {
 
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _scrollViewKey = GlobalKey();
+  final GlobalKey _summaryKey = GlobalKey();
 
-  String _activeStickySection = 'Income';
+  String _searchQuery = '';
+  late final TextEditingController _searchController;
+  // Sections are expanded by default. Track only what the user has collapsed.
+  final Set<String> _collapsedSections = <String>{};
+
+  PodsFocusTarget? _pendingFocusTarget;
+  PodsFocusFilter? _activeFocusFilter;
+  final Map<String, GlobalKey> _podRowKeys = <String, GlobalKey>{};
 
   // In-list section markers used to compute the active section for the single
   // sticky header (so headers “replace” instead of stacking).
   final Map<String, GlobalKey> _sectionMarkerKeys = <String, GlobalKey>{
-    'Income': GlobalKey(),
     'Savings': GlobalKey(),
     'Kiddos': GlobalKey(),
     'Necessities': GlobalKey(),
     'Pressing': GlobalKey(),
     'Discretionary': GlobalKey(),
     'Uncategorized': GlobalKey(),
+    'Income': GlobalKey(),
   };
 
   String? _lastHouseholdId;
-  DateTime? _lastAutoSyncAttemptAt;
-  String? _lastAutoSyncHouseholdId;
+
+  StreamSubscription<String?>? _refreshSub;
 
   static const _expenseSections = <String>[
     'Savings',
@@ -54,10 +70,7 @@ class _PodsScreenState extends State<PodsScreen> {
     'Discretionary',
   ];
 
-  static const _sectionOptions = <String>[
-    'Income',
-    ..._expenseSections,
-  ];
+  static const _sectionOptions = <String>['Income', ..._expenseSections];
 
   String _formatCents(int? cents) {
     if (cents == null) return '—';
@@ -84,46 +97,34 @@ class _PodsScreenState extends State<PodsScreen> {
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
+    _searchController = TextEditingController(text: _searchQuery);
+    _pendingFocusTarget = widget.focusTarget;
+    _activeFocusFilter = widget.focusTarget?.filter;
+    _refreshSub = PodsRefreshBus.instance.stream.listen((reason) {
+      debugPrint('Pods refresh requested: ${reason ?? 'unknown'}');
+      _load();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant PodsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusTarget != oldWidget.focusTarget &&
+        widget.focusTarget != null) {
+      _pendingFocusTarget = widget.focusTarget;
+      _activeFocusFilter = widget.focusTarget?.filter ?? _activeFocusFilter;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _applyFocusTargetIfNeeded();
+      });
+    }
   }
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.dispose();
+    _refreshSub?.cancel();
     super.dispose();
-  }
-
-  void _onScroll() {
-    final scrollBox =
-        _scrollViewKey.currentContext?.findRenderObject() as RenderBox?;
-    if (scrollBox == null || !scrollBox.attached) return;
-
-    final viewportTop = scrollBox.localToGlobal(Offset.zero).dy;
-    final threshold = viewportTop +
-        _BudgetSignalHeaderDelegate.height +
-        _StickyHeaderDelegate.height +
-        1;
-
-    String? bestTitle;
-    double bestY = double.negativeInfinity;
-
-    for (final entry in _sectionMarkerKeys.entries) {
-      final ctx = entry.value.currentContext;
-      if (ctx == null) continue;
-      final box = ctx.findRenderObject() as RenderBox?;
-      if (box == null || !box.attached) continue;
-      final y = box.localToGlobal(Offset.zero).dy;
-      if (y <= threshold && y > bestY) {
-        bestY = y;
-        bestTitle = entry.key;
-      }
-    }
-
-    final next = bestTitle ?? _activeStickySection;
-    if (next != _activeStickySection) {
-      setState(() => _activeStickySection = next);
-    }
   }
 
   Color _sectionColor(String title) {
@@ -153,7 +154,6 @@ class _PodsScreenState extends State<PodsScreen> {
     if (householdId != null && householdId != _lastHouseholdId) {
       _lastHouseholdId = householdId;
       _load();
-      _maybeAutoSync();
     }
   }
 
@@ -169,26 +169,155 @@ class _PodsScreenState extends State<PodsScreen> {
     });
 
     try {
-      final pods = await _service.listPods(householdId: householdId);
+      final pods = await _service.listPodsWithSettings(
+        householdId: householdId,
+      );
       List<IncomeSource> sources = const [];
       try {
-        sources = await _incomeService.listIncomeSources(householdId: householdId);
+        sources = await _incomeService.listIncomeSources(
+          householdId: householdId,
+        );
       } catch (_) {
         // Tolerate missing table / migrations during local dev.
         sources = const [];
       }
+      debugPrint(
+        'Pods DB refresh results: pods=${pods.length} incomeSources=${sources.length}',
+      );
       if (!mounted) return;
       setState(() {
         _pods = pods;
         _incomeSources = sources;
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _applyFocusTargetIfNeeded();
+      });
     } catch (e) {
       if (!mounted) return;
+      debugPrint('Pods DB refresh failed: $e');
       setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  GlobalKey _podRowKey(String podId) =>
+      _podRowKeys.putIfAbsent(podId, () => GlobalKey());
+
+  void _applyFocusTargetIfNeeded() {
+    final target = _pendingFocusTarget;
+    if (target == null) return;
+    _pendingFocusTarget = null;
+
+    if (!_scrollController.hasClients) return;
+
+    // Priority: explicit pod → section → filter.
+    if (target.podId != null) {
+      final key = _podRowKeys[target.podId!];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: 0.12,
+        );
+        return;
+      }
+    }
+
+    if (target.sectionTitle != null) {
+      final key = _sectionMarkerKeys[target.sectionTitle!];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: 0.08,
+        );
+        return;
+      }
+    }
+
+    if (target.filter == PodsFocusFilter.uncategorized) {
+      final key = _sectionMarkerKeys['Uncategorized'];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: 0.08,
+        );
+        return;
+      }
+    }
+
+    if (target.filter == PodsFocusFilter.missingBudget) {
+      // Scroll to the first expense pod with a missing budget, if it exists.
+      for (final p in _pods) {
+        if (_isIncome(p)) continue;
+        if (p.settings?.budgetedAmountCents != null) continue;
+        final key = _podRowKeys[p.id];
+        final ctx = key?.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(
+            ctx,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: 0.12,
+          );
+        }
+        break;
+      }
+    }
+  }
+
+  List<Pod> _applyExpenseFocusFilter(List<Pod> expensePods) {
+    final filter = _activeFocusFilter;
+    if (filter == null) return expensePods;
+
+    switch (filter) {
+      case PodsFocusFilter.missingBudget:
+        return expensePods
+            .where((p) => p.settings?.budgetedAmountCents == null)
+            .toList(growable: false);
+      case PodsFocusFilter.uncategorized:
+        return expensePods
+            .where((p) {
+              final c = p.settings?.category;
+              return c == null || c.isEmpty || !_expenseSections.contains(c);
+            })
+            .toList(growable: false);
+    }
+  }
+
+  String? _focusFilterLabel() {
+    switch (_activeFocusFilter) {
+      case PodsFocusFilter.missingBudget:
+        return 'Filtered: Missing budgets';
+      case PodsFocusFilter.uncategorized:
+        return 'Filtered: Uncategorized';
+      case null:
+        return null;
+    }
+  }
+
+  bool _isSectionExpanded(String title) {
+    if (_enableSearch && _searchQuery.trim().isNotEmpty) return true;
+    if (_activeFocusFilter != null) return true;
+    return !_collapsedSections.contains(title);
+  }
+
+  void _toggleSectionExpanded(String title) {
+    setState(() {
+      if (_collapsedSections.contains(title)) {
+        _collapsedSections.remove(title);
+      } else {
+        _collapsedSections.add(title);
+      }
+    });
   }
 
   Future<void> _syncFromSequence({bool showFeedback = true}) async {
@@ -227,36 +356,6 @@ class _PodsScreenState extends State<PodsScreen> {
     }
   }
 
-  Future<void> _maybeAutoSync() async {
-    final household = PennyPopScope.householdOf(context).active;
-    final householdId = household?.id;
-    final isAdmin = household?.role == 'admin';
-    if (!isAdmin || householdId == null) return;
-
-    // Throttle auto-sync attempts so we don't hammer Sequence while navigating.
-    final now = DateTime.now().toUtc();
-    if (_lastAutoSyncHouseholdId == householdId &&
-        _lastAutoSyncAttemptAt != null &&
-        now.difference(_lastAutoSyncAttemptAt!) < const Duration(minutes: 2)) {
-      return;
-    }
-    _lastAutoSyncHouseholdId = householdId;
-    _lastAutoSyncAttemptAt = now;
-
-    try {
-      final last = await _service.latestBalanceUpdatedAt(
-        householdId: householdId,
-      );
-      final stale =
-          last == null ||
-          now.difference(last.toUtc()) > const Duration(minutes: 15);
-      if (!stale) return;
-      await _syncFromSequence(showFeedback: false);
-    } catch (_) {
-      // Silent: auto-refresh is best-effort. Manual Sync will still surface errors.
-    }
-  }
-
   Future<void> _onPullToRefresh() async {
     final household = PennyPopScope.householdOf(context).active;
     final isAdmin = household?.role == 'admin';
@@ -275,16 +374,17 @@ class _PodsScreenState extends State<PodsScreen> {
         return _PodBudgetSheet(
           pod: pod,
           sectionOptions: _sectionOptions,
-          onSave: ({
-            required String? category,
-            required int? budgetedAmountCents,
-          }) async {
-            await _service.upsertPodBudget(
-              podId: pod.id,
-              category: category,
-              budgetedAmountCents: budgetedAmountCents,
-            );
-          },
+          onSave:
+              ({
+                required String? category,
+                required int? budgetedAmountCents,
+              }) async {
+                await _service.upsertPodBudget(
+                  podId: pod.id,
+                  category: category,
+                  budgetedAmountCents: budgetedAmountCents,
+                );
+              },
         );
       },
     );
@@ -306,19 +406,17 @@ class _PodsScreenState extends State<PodsScreen> {
       builder: (context) {
         return _IncomeSourceSheet(
           source: source,
-          onSave: ({
-            required String name,
-            required int budgetedAmountCents,
-          }) async {
-            await _incomeService.upsertIncomeSource(
-              id: source?.id,
-              householdId: householdId,
-              name: name,
-              budgetedAmountCents: budgetedAmountCents,
-              sortOrder: source?.sortOrder,
-              isActive: true,
-            );
-          },
+          onSave:
+              ({required String name, required int budgetedAmountCents}) async {
+                await _incomeService.upsertIncomeSource(
+                  id: source?.id,
+                  householdId: householdId,
+                  name: name,
+                  budgetedAmountCents: budgetedAmountCents,
+                  sortOrder: source?.sortOrder,
+                  isActive: true,
+                );
+              },
           onArchive: source == null
               ? null
               : () async {
@@ -381,19 +479,39 @@ class _PodsScreenState extends State<PodsScreen> {
     final systemRed = CupertinoColors.systemRed.resolveFrom(context);
     final systemGreen = CupertinoColors.systemGreen.resolveFrom(context);
 
-    final incomePods = _pods.where(_isIncome).toList(growable: false);
-    final expensePods = _pods.where((p) => !_isIncome(p)).toList(growable: false);
+    final allIncomePods = _pods.where(_isIncome).toList(growable: false);
+    final allExpensePods = _pods
+        .where((p) => !_isIncome(p))
+        .toList(growable: false);
 
     final totalIncomeCents = _incomeSources.isNotEmpty
         ? _sumIncomeSourceBudgeted(_incomeSources)
-        : _sumBudgeted(incomePods);
-    final totalExpenseCents = _sumBudgeted(expensePods);
+        : _sumBudgeted(allIncomePods);
+    final totalExpenseCents = _sumBudgeted(allExpensePods);
     final leftToBudgetCents = totalIncomeCents - totalExpenseCents;
     final leftPct = _pctOfIncome(
       partCents: leftToBudgetCents,
       incomeCents: totalIncomeCents,
     );
-    final incomePodBalanceCents = _sumBalances(incomePods);
+
+    var viewIncomePods = allIncomePods;
+    var viewExpensePods = _applyExpenseFocusFilter(allExpensePods);
+    var viewIncomeSources = _incomeSources;
+
+    if (_enableSearch) {
+      final q = _searchQuery.trim().toLowerCase();
+      if (q.isNotEmpty) {
+        viewIncomePods = viewIncomePods
+            .where((p) => p.name.toLowerCase().contains(q))
+            .toList(growable: false);
+        viewExpensePods = viewExpensePods
+            .where((p) => p.name.toLowerCase().contains(q))
+            .toList(growable: false);
+        viewIncomeSources = viewIncomeSources
+            .where((s) => s.name.toLowerCase().contains(q))
+            .toList(growable: false);
+      }
+    }
 
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
@@ -426,6 +544,19 @@ class _PodsScreenState extends State<PodsScreen> {
                 ),
               ),
             ),
+            if (_enableSearch)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: CupertinoSearchTextField(
+                    controller: _searchController,
+                    placeholder: 'Search envelopes',
+                    onChanged: (value) => setState(() {
+                      _searchQuery = value;
+                    }),
+                  ),
+                ),
+              ),
             if (active == null)
               const SliverToBoxAdapter(
                 child: Padding(
@@ -453,12 +584,40 @@ class _PodsScreenState extends State<PodsScreen> {
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'No envelopes yet.',
-                  ),
+                  child: Text('No envelopes yet.'),
                 ),
               )
-            else
+            else ...[
+              if (_activeFocusFilter != null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: GlassCard(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${_focusFilterLabel()} • ${viewExpensePods.length} envelopes',
+                              style: TextStyle(
+                                color: primaryText,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: () => setState(() {
+                              _activeFocusFilter = null;
+                            }),
+                            child: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ..._buildEnvelopesSlivers(
                 primaryText: primaryText,
                 secondaryText: secondaryText,
@@ -469,11 +628,11 @@ class _PodsScreenState extends State<PodsScreen> {
                 totalExpenseCents: totalExpenseCents,
                 leftToBudgetCents: leftToBudgetCents,
                 leftPct: leftPct,
-                incomePods: incomePods,
-                incomeSources: _incomeSources,
-                incomePodBalanceCents: incomePodBalanceCents,
-                expensePods: expensePods,
+                incomePods: viewIncomePods,
+                incomeSources: viewIncomeSources,
+                expensePods: viewExpensePods,
               ),
+            ],
           ],
         ),
       ),
@@ -492,24 +651,22 @@ class _PodsScreenState extends State<PodsScreen> {
     required double? leftPct,
     required List<Pod> incomePods,
     required List<IncomeSource> incomeSources,
-    required int? incomePodBalanceCents,
     required List<Pod> expensePods,
   }) {
-    final leftLabel =
-        leftToBudgetCents < 0 ? 'Over budget by' : 'Unassigned';
+    final leftLabel = leftToBudgetCents < 0 ? 'Over budget by' : 'Unassigned';
     final leftColor = leftToBudgetCents < 0 ? systemRed : systemGreen;
 
     Widget summaryRow(String label, String value, {Color? valueColor}) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
             Expanded(
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                   color: secondaryText,
                 ),
               ),
@@ -517,8 +674,8 @@ class _PodsScreenState extends State<PodsScreen> {
             Text(
               value,
               style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
                 color: valueColor ?? primaryText,
               ),
             ),
@@ -528,155 +685,166 @@ class _PodsScreenState extends State<PodsScreen> {
     }
 
     final summary = SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: GlassCard(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Budget',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: primaryText,
+      child: KeyedSubtree(
+        key: _summaryKey,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: GlassCard(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Budget',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: primaryText,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              summaryRow(
-                'Total Income',
-                _formatCents(totalIncomeCents),
-              ),
-              if (incomePodBalanceCents != null)
+                const SizedBox(height: 4),
+                summaryRow('Total Income', _formatCents(totalIncomeCents)),
                 summaryRow(
-                  'Income Pod Balance',
-                  _formatCents(incomePodBalanceCents),
+                  'Total Budgeted Expenses',
+                  _formatCents(totalExpenseCents),
                 ),
-              summaryRow(
-                'Total Budgeted Expenses',
-                _formatCents(totalExpenseCents),
-              ),
-              Container(height: 1, color: dividerColor),
-              summaryRow(
-                leftLabel,
-                _formatCents(leftToBudgetCents.abs()),
-                valueColor: leftColor,
-              ),
-              if (totalIncomeCents > 0)
+                Container(height: 1, color: dividerColor),
                 summaryRow(
-                  'Left to Budget %',
-                  _formatPct(leftPct),
+                  leftLabel,
+                  _formatCents(leftToBudgetCents.abs()),
                   valueColor: leftColor,
                 ),
-            ],
+                if (totalIncomeCents > 0)
+                  summaryRow(
+                    'Left to Budget %',
+                    _formatPct(leftPct),
+                    valueColor: leftColor,
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
 
-    SliverToBoxAdapter _sectionHeaderSliver({
+    SliverToBoxAdapter sectionHeaderSliver({
       required String title,
       required String metaText,
       required String col1,
       required String col3,
       required double col2Width,
       required double col3Width,
+      bool show = true,
     }) {
       final markerKey = _sectionMarkerKeys[title];
       final pillColor = _sectionColor(title);
+      final expanded = _isSectionExpanded(title);
+      final chevron = expanded
+          ? CupertinoIcons.chevron_down
+          : CupertinoIcons.chevron_right;
       return SliverToBoxAdapter(
         child: KeyedSubtree(
           key: markerKey,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: pillColor.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        child: Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: pillColor,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        metaText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: secondaryText,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        col1,
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 0.4,
-                          fontWeight: FontWeight.w800,
-                          color: secondaryText,
+          child: show
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                  child: Column(
+                    children: [
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                        pressedOpacity: 0.65,
+                        onPressed: () => _toggleSectionExpanded(title),
+                        child: Row(
+                          children: [
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: pillColor.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                child: Text(
+                                  title,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: pillColor,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                metaText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: secondaryText,
+                                ),
+                              ),
+                            ),
+                            Icon(chevron, size: 16, color: secondaryText),
+                          ],
                         ),
                       ),
-                    ),
-                    SizedBox(
-                      width: col2Width,
-                      child: Text(
-                        'BUDGET',
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 0.4,
-                          fontWeight: FontWeight.w800,
-                          color: secondaryText,
+                      if (expanded) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                col1,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  letterSpacing: 0.4,
+                                  fontWeight: FontWeight.w800,
+                                  color: secondaryText,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: col2Width,
+                              child: Text(
+                                'BUDGET',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  letterSpacing: 0.4,
+                                  fontWeight: FontWeight.w800,
+                                  color: secondaryText,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              width: col3Width,
+                              child: Text(
+                                col3,
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  letterSpacing: 0.4,
+                                  fontWeight: FontWeight.w800,
+                                  color: secondaryText,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: col3Width,
-                      child: Text(
-                        col3,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 0.4,
-                          fontWeight: FontWeight.w800,
-                          color: secondaryText,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Container(height: 1, color: dividerColor),
-              ],
-            ),
-          ),
+                      ],
+                      const SizedBox(height: 6),
+                      Container(height: 1, color: dividerColor),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(),
         ),
       );
     }
@@ -685,11 +853,15 @@ class _PodsScreenState extends State<PodsScreen> {
       required String title,
       required List<Pod> pods,
       required int totalIncomeCents,
+      bool showHeader = true,
     }) {
       if (pods.isEmpty) return const [];
 
       final sectionBudgeted = _sumBudgeted(pods);
-      final pct = _pctOfIncome(partCents: sectionBudgeted, incomeCents: totalIncomeCents);
+      final pct = _pctOfIncome(
+        partCents: sectionBudgeted,
+        incomeCents: totalIncomeCents,
+      );
       const budgetColWidth = 116.0;
       const balanceColWidth = 104.0;
 
@@ -706,10 +878,23 @@ class _PodsScreenState extends State<PodsScreen> {
 
       final totalsBg = CupertinoColors.systemGrey6.resolveFrom(context);
 
+      final header = sectionHeaderSliver(
+        title: title,
+        metaText: metaText,
+        col1: 'ENVELOPE',
+        col3: 'BALANCE',
+        col2Width: budgetColWidth,
+        col3Width: balanceColWidth,
+        show: showHeader,
+      );
+
+      final expanded = _isSectionExpanded(title);
+      if (!expanded) return [header];
+
       final list = SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate((context, index) {
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate((context, index) {
             final totalsIdx = pods.length;
             final spacerIdx = pods.length + 1;
 
@@ -763,8 +948,8 @@ class _PodsScreenState extends State<PodsScreen> {
                               balanceText,
                               textAlign: TextAlign.right,
                               style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                                 color: secondaryText,
                               ),
                             ),
@@ -781,105 +966,116 @@ class _PodsScreenState extends State<PodsScreen> {
 
             final pod = pods[index];
             final budgeted = pod.settings?.budgetedAmountCents;
-            final budgetedText = budgeted == null ? '—' : _formatCents(budgeted);
+            final budgetedText = budgeted == null
+                ? '—'
+                : _formatCents(budgeted);
 
             final balanceText = pod.balanceError != null
-                        ? '—'
-                        : _formatCents(pod.balanceCents);
+                ? '—'
+                : _formatCents(pod.balanceCents);
 
-                    return Column(
-                      children: [
-                        CupertinoButton(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          minimumSize: Size.zero,
-                          pressedOpacity: 0.65,
-                          alignment: Alignment.centerLeft,
-                  onPressed: () => _editPodBudget(pod),
-                          child: DefaultTextStyle(
-                            style: TextStyle(color: primaryText),
-                            child: Row(
-                              children: [
-                                const SizedBox(width: 2),
-                                Expanded(
-                          child: Text(
-                                        pod.name,
-                                        style: TextStyle(
-                              fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                          color: primaryText,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          width: budgetColWidth,
-                          child: Text(
-                            budgetedText,
-                            textAlign: TextAlign.right,
-                                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: primaryText,
+            final rowKey = _podRowKey(pod.id);
+            return KeyedSubtree(
+              key: rowKey,
+              child: Column(
+                children: [
+                  CupertinoButton(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    minimumSize: Size.zero,
+                    pressedOpacity: 0.65,
+                    alignment: Alignment.centerLeft,
+                    onPressed: () => _editPodBudget(pod),
+                    child: DefaultTextStyle(
+                      style: TextStyle(color: primaryText),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 2),
+                          Expanded(
+                            child: Text(
+                              pod.name,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: primaryText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          width: balanceColWidth,
-                          child: Text(
-                            balanceText,
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                                            color: secondaryText,
-                                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: budgetColWidth,
+                            child: Text(
+                              budgetedText,
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: primaryText,
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        IconTheme(
-                          data: IconThemeData(color: secondaryText),
-                          child: const PixelIcon(
-                            'assets/icons/ui/chevron_right.svg',
-                            semanticLabel: 'Edit',
-                            size: 18,
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: balanceColWidth,
+                            child: Text(
+                              balanceText,
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: secondaryText,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 6),
+                          IconTheme(
+                            data: IconThemeData(color: secondaryText),
+                            child: const PixelIcon(
+                              'assets/icons/ui/chevron_right.svg',
+                              semanticLabel: 'Edit',
+                              size: 18,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                Container(height: 1, color: dividerColor),
-              ],
+                  Container(height: 1, color: dividerColor),
+                ],
+              ),
             );
           }, childCount: pods.length + 2),
         ),
       );
 
-      return [
-        _sectionHeaderSliver(
-          title: title,
-          metaText: metaText,
-          col1: 'ENVELOPE',
-          col3: 'BALANCE',
-          col2Width: budgetColWidth,
-          col3Width: balanceColWidth,
-        ),
-        list,
-      ];
+      return [header, list];
     }
 
     List<Widget> buildIncomeSourcesSection({
       required List<IncomeSource> sources,
       required int totalIncomeCents,
+      bool showHeader = true,
     }) {
       const budgetColWidth = 116.0;
       const leftColWidth = 104.0;
 
       final sectionBudgeted = _sumIncomeSourceBudgeted(sources);
       final metaText = '${sources.length} sources';
+      final totalsBg = CupertinoColors.systemGrey6.resolveFrom(context);
+
+      final header = sectionHeaderSliver(
+        title: 'Income',
+        metaText: metaText,
+        col1: 'SOURCE',
+        col3: '',
+        col2Width: budgetColWidth,
+        col3Width: leftColWidth,
+        show: showHeader,
+      );
+
+      final expanded = _isSectionExpanded('Income');
+      if (!expanded) return [header];
 
       final list = SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -919,26 +1115,28 @@ class _PodsScreenState extends State<PodsScreen> {
                               title,
                               style: TextStyle(
                                 fontSize: 16,
-                                fontWeight:
-                                    bold ? FontWeight.w800 : FontWeight.w600,
+                                fontWeight: bold
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
                                 color: onPressed == null
                                     ? secondaryText
                                     : primaryText,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
                           SizedBox(
                             width: budgetColWidth,
                             child: Text(
                               budgetText,
                               textAlign: TextAlign.right,
-                                  style: TextStyle(
+                              style: TextStyle(
                                 fontSize: 16,
-                                fontWeight:
-                                    bold ? FontWeight.w800 : FontWeight.w700,
+                                fontWeight: bold
+                                    ? FontWeight.w800
+                                    : FontWeight.w700,
                                 color: onPressed == null
                                     ? secondaryText
                                     : primaryText,
@@ -953,37 +1151,41 @@ class _PodsScreenState extends State<PodsScreen> {
                               textAlign: TextAlign.right,
                               style: TextStyle(
                                 fontSize: 14,
-                                fontWeight:
-                                    bold ? FontWeight.w800 : FontWeight.w700,
+                                fontWeight: bold
+                                    ? FontWeight.w800
+                                    : FontWeight.w700,
                                 color: secondaryText,
                               ),
                             ),
                           ),
                           if (chevron && onPressed != null) ...[
-                                const SizedBox(width: 6),
-                                IconTheme(
-                                  data: IconThemeData(color: secondaryText),
-                                  child: const PixelIcon(
-                                    'assets/icons/ui/chevron_right.svg',
-                                    semanticLabel: 'Edit',
-                                    size: 18,
-                                  ),
-                                ),
-                          ],
-                              ],
+                            const SizedBox(width: 6),
+                            IconTheme(
+                              data: IconThemeData(color: secondaryText),
+                              child: const PixelIcon(
+                                'assets/icons/ui/chevron_right.svg',
+                                semanticLabel: 'Edit',
+                                size: 18,
+                              ),
                             ),
-                          ),
-                        ),
-                        Container(height: 1, color: dividerColor),
-                      ],
-                    );
+                          ] else ...[
+                            // Keep column alignment consistent with rows that have a chevron.
+                            const SizedBox(width: 24),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  Container(height: 1, color: dividerColor),
+                ],
+              );
             }
 
             if (index < sourcesCount) {
               final s = sources[index];
               final budgetText = _formatCents(s.budgetedAmountCents);
-              // v1: without per-source actuals, left-to-earn equals planned.
-              final leftText = _formatCents(s.budgetedAmountCents);
+              // Removed v1 "Left to Earn" column; keep the column slot empty for alignment.
+              const leftText = '';
               return row(
                 title: s.name,
                 budgetText: budgetText,
@@ -994,13 +1196,53 @@ class _PodsScreenState extends State<PodsScreen> {
 
             if (index == totalsIdx) {
               final totalText = _formatCents(sectionBudgeted);
-              return row(
-                title: 'Income Totals',
-                budgetText: totalText,
-                leftText: totalText,
-                onPressed: null,
-                bold: true,
-                chevron: false,
+              return Column(
+                children: [
+                  Container(
+                    color: totalsBg,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: DefaultTextStyle(
+                      style: TextStyle(color: primaryText),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 2),
+                          Expanded(
+                            child: Text(
+                              'Income Totals',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: primaryText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: budgetColWidth,
+                            child: Text(
+                              totalText,
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: primaryText,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: leftColWidth,
+                            child: const Text('', textAlign: TextAlign.right),
+                          ),
+                          const SizedBox(width: 24),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Container(height: 1, color: dividerColor),
+                ],
               );
             }
 
@@ -1038,117 +1280,64 @@ class _PodsScreenState extends State<PodsScreen> {
         ),
       );
 
-      return [
-        _sectionHeaderSliver(
-          title: 'Income',
-          metaText: metaText,
-          col1: 'SOURCE',
-          col3: 'LEFT TO EARN',
-          col2Width: budgetColWidth,
-          col3Width: leftColWidth,
+      return [header, list];
+    }
+
+    final slivers = <Widget>[
+      summary,
+      const SliverToBoxAdapter(child: SizedBox(height: 10)),
+    ];
+
+    final uncategorized =
+        expensePods
+            .where((p) {
+              final c = p.settings?.category;
+              return c == null || c.isEmpty || !_expenseSections.contains(c);
+            })
+            .toList(growable: false)
+          ..sort((a, b) => a.name.compareTo(b.name));
+
+    // Expense sections
+    for (final section in _expenseSections) {
+      final pods =
+          expensePods
+              .where((p) => p.settings?.category == section)
+              .toList(growable: false)
+            ..sort((a, b) => a.name.compareTo(b.name));
+      if (pods.isNotEmpty) {
+        slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 14)));
+      }
+      slivers.addAll(
+        buildSection(
+          title: section,
+          pods: pods,
+          totalIncomeCents: totalIncomeCents,
+          showHeader: true,
         ),
-        list,
-      ];
+      );
     }
 
-    const budgetColWidth = 116.0;
-    const rightColWidth = 104.0;
-
-    final leftPctText = totalIncomeCents > 0 ? _formatPct(leftPct) : '—';
-    final unassignedText = _formatCents(leftToBudgetCents.abs());
-
-    int activeSectionBudgetedCents = 0;
-    String activeCountText = '0 envelopes';
-    String? activePctText;
-    String activeCol1 = 'ENVELOPE';
-    String activeCol3 = 'BALANCE';
-
-    if (_activeStickySection == 'Income') {
-      final incomeUsesSources = incomeSources.isNotEmpty || incomePods.isEmpty;
-      if (incomeUsesSources) {
-        activeSectionBudgetedCents = _sumIncomeSourceBudgeted(incomeSources);
-        activeCountText = '${incomeSources.length} sources';
-        activeCol1 = 'SOURCE';
-        activeCol3 = 'LEFT TO EARN';
-      } else {
-        activeSectionBudgetedCents = _sumBudgeted(incomePods);
-        activeCountText = '${incomePods.length} envelopes';
-      }
-    } else if (_expenseSections.contains(_activeStickySection)) {
-      final pods = expensePods
-          .where((p) => p.settings?.category == _activeStickySection)
-          .toList(growable: false);
-      activeSectionBudgetedCents = _sumBudgeted(pods);
-      activeCountText = '${pods.length} envelopes';
-      if (totalIncomeCents > 0) {
-        final pct = _pctOfIncome(
-          partCents: activeSectionBudgetedCents,
-          incomeCents: totalIncomeCents,
-        );
-        activePctText = '${_formatPct(pct)} of income';
-      }
-    } else if (_activeStickySection == 'Uncategorized') {
-      final pods = expensePods
-          .where((p) {
-            final c = p.settings?.category;
-            return c == null || c.isEmpty || !_expenseSections.contains(c);
-          })
-          .toList(growable: false);
-      activeSectionBudgetedCents = _sumBudgeted(pods);
-      activeCountText = '${pods.length} envelopes';
-      if (totalIncomeCents > 0) {
-        final pct = _pctOfIncome(
-          partCents: activeSectionBudgetedCents,
-          incomeCents: totalIncomeCents,
-        );
-        activePctText = '${_formatPct(pct)} of income';
-      }
+    // Uncategorized / Other
+    if (uncategorized.isNotEmpty) {
+      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 14)));
     }
-
-    final stickyMetaText = <String>[
-      activeCountText,
-      if (activePctText != null) activePctText,
-    ].join(' • ');
-
-    final budgetSignalSticky = SliverPersistentHeader(
-      pinned: true,
-      delegate: _BudgetSignalHeaderDelegate(
-        leftLabel: leftLabel,
-        unassignedText: unassignedText,
-        leftPctText: leftPctText,
-        leftColor: leftColor,
-        primaryText: primaryText,
-        secondaryText: secondaryText,
-        dividerColor: dividerColor,
+    slivers.addAll(
+      buildSection(
+        title: 'Uncategorized',
+        pods: uncategorized,
+        totalIncomeCents: totalIncomeCents,
+        showHeader: true,
       ),
     );
-
-    final sticky = SliverPersistentHeader(
-      pinned: true,
-      delegate: _StickyHeaderDelegate(
-        title: _activeStickySection,
-        pillColor: _sectionColor(_activeStickySection),
-        metaText: stickyMetaText,
-        sectionTotalText: null,
-        col1: activeCol1,
-        col3: activeCol3,
-        col2Width: budgetColWidth,
-        col3Width: rightColWidth,
-        primaryText: primaryText,
-        secondaryText: secondaryText,
-        dividerColor: dividerColor,
-      ),
-    );
-
-    final slivers = <Widget>[budgetSignalSticky, sticky, summary];
 
     // Income section
-    slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 6)));
+    slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 14)));
     if (incomeSources.isNotEmpty) {
       slivers.addAll(
         buildIncomeSourcesSection(
           sources: incomeSources,
           totalIncomeCents: totalIncomeCents,
+          showHeader: true,
         ),
       );
     } else {
@@ -1159,6 +1348,7 @@ class _PodsScreenState extends State<PodsScreen> {
           buildIncomeSourcesSection(
             sources: const [],
             totalIncomeCents: totalIncomeCents,
+            showHeader: true,
           ),
         );
       } else {
@@ -1167,338 +1357,50 @@ class _PodsScreenState extends State<PodsScreen> {
             title: 'Income',
             pods: incomePods..sort((a, b) => a.name.compareTo(b.name)),
             totalIncomeCents: totalIncomeCents,
+            showHeader: true,
           ),
         );
-        slivers.add(
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                children: [
-                  CupertinoButton(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    minimumSize: Size.zero,
-                    pressedOpacity: 0.65,
-                    alignment: Alignment.centerLeft,
-                    onPressed: () => _editIncomeSource(null),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: Align(
+        if (_isSectionExpanded('Income')) {
+          slivers.add(
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  children: [
+                    CupertinoButton(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      minimumSize: Size.zero,
+                      pressedOpacity: 0.65,
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        '+ New',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: secondaryText,
+                      onPressed: () => _editIncomeSource(null),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '+ New',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: secondaryText,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  ),
-                  Container(height: 1, color: dividerColor),
-                  const SizedBox(height: 2),
-                ],
+                    Container(height: 1, color: dividerColor),
+                    const SizedBox(height: 2),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
       }
     }
-
-    // Expense sections
-    for (final section in _expenseSections) {
-      final pods = expensePods
-          .where((p) => p.settings?.category == section)
-          .toList(growable: false)
-        ..sort((a, b) => a.name.compareTo(b.name));
-      if (pods.isNotEmpty) {
-        slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 22)));
-      }
-      slivers.addAll(
-        buildSection(
-          title: section,
-          pods: pods,
-          totalIncomeCents: totalIncomeCents,
-        ),
-      );
-    }
-
-    // Uncategorized / Other
-    final uncategorized = expensePods
-        .where((p) {
-          final c = p.settings?.category;
-          return c == null || c.isEmpty || !_expenseSections.contains(c);
-        })
-        .toList(growable: false)
-      ..sort((a, b) => a.name.compareTo(b.name));
-    if (uncategorized.isNotEmpty) {
-      slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 22)));
-    }
-    slivers.addAll(
-      buildSection(
-        title: 'Uncategorized',
-        pods: uncategorized,
-        totalIncomeCents: totalIncomeCents,
-      ),
-    );
 
     slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 80)));
     return slivers;
-  }
-}
-
-class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _StickyHeaderDelegate({
-    required this.title,
-    required this.pillColor,
-    required this.metaText,
-    required this.sectionTotalText,
-    required this.col1,
-    required this.col3,
-    required this.col2Width,
-    required this.col3Width,
-    required this.primaryText,
-    required this.secondaryText,
-    required this.dividerColor,
-  });
-
-  static const double height = 74;
-
-  final String title;
-  final Color pillColor;
-  final String metaText;
-  final String? sectionTotalText;
-  final String col1;
-  final String col3;
-  final double col2Width;
-  final double col3Width;
-  final Color primaryText;
-  final Color secondaryText;
-  final Color dividerColor;
-
-  @override
-  double get minExtent => height;
-
-  @override
-  double get maxExtent => height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    final bg = CupertinoColors.systemBackground.resolveFrom(context);
-
-    return ColoredBox(
-      color: bg,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-        child: ClipRect(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: pillColor.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      child: Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: pillColor,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      metaText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: secondaryText,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  if (sectionTotalText != null && sectionTotalText!.isNotEmpty)
-                    Text(
-                      sectionTotalText!,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                        color: primaryText,
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      col1,
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 0.4,
-                        fontWeight: FontWeight.w800,
-                        color: secondaryText,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: col2Width,
-                    child: Text(
-                      'BUDGET',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 0.4,
-                        fontWeight: FontWeight.w800,
-                        color: secondaryText,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: col3Width,
-                    child: Text(
-                      col3,
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 0.4,
-                        fontWeight: FontWeight.w800,
-                        color: secondaryText,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Container(height: 1, color: dividerColor),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return title != oldDelegate.title ||
-        pillColor != oldDelegate.pillColor ||
-        metaText != oldDelegate.metaText ||
-        sectionTotalText != oldDelegate.sectionTotalText ||
-        col1 != oldDelegate.col1 ||
-        col3 != oldDelegate.col3 ||
-        col2Width != oldDelegate.col2Width ||
-        col3Width != oldDelegate.col3Width ||
-        primaryText != oldDelegate.primaryText ||
-        secondaryText != oldDelegate.secondaryText ||
-        dividerColor != oldDelegate.dividerColor;
-  }
-}
-
-class _BudgetSignalHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _BudgetSignalHeaderDelegate({
-    required this.leftLabel,
-    required this.unassignedText,
-    required this.leftPctText,
-    required this.leftColor,
-    required this.primaryText,
-    required this.secondaryText,
-    required this.dividerColor,
-  });
-
-  static const double height = 44;
-
-  final String leftLabel;
-  final String unassignedText;
-  final String leftPctText;
-  final Color leftColor;
-  final Color primaryText;
-  final Color secondaryText;
-  final Color dividerColor;
-
-  @override
-  double get minExtent => height;
-
-  @override
-  double get maxExtent => height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    final bg = CupertinoColors.systemBackground.resolveFrom(context);
-
-    Widget chip({required String text}) {
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: leftColor.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              color: leftColor,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return ColoredBox(
-      color: bg,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Row(
-              children: [
-                chip(text: '$leftLabel $unassignedText'),
-                const SizedBox(width: 10),
-                chip(text: 'Left $leftPctText'),
-                const Spacer(),
-              ],
-            ),
-          ),
-          Container(height: 1, color: dividerColor),
-        ],
-      ),
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _BudgetSignalHeaderDelegate oldDelegate) {
-    return leftLabel != oldDelegate.leftLabel ||
-        unassignedText != oldDelegate.unassignedText ||
-        leftPctText != oldDelegate.leftPctText ||
-        leftColor != oldDelegate.leftColor ||
-        primaryText != oldDelegate.primaryText ||
-        secondaryText != oldDelegate.secondaryText ||
-        dividerColor != oldDelegate.dividerColor;
   }
 }
 
@@ -1524,8 +1426,9 @@ class _IncomeSourceSheet extends StatefulWidget {
 }
 
 class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
-  late final TextEditingController _name =
-      TextEditingController(text: widget.source?.name ?? '');
+  late final TextEditingController _name = TextEditingController(
+    text: widget.source?.name ?? '',
+  );
 
   late final TextEditingController _budgeted = TextEditingController(
     text: widget.source == null
@@ -1550,7 +1453,10 @@ class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
         _budgetFocus.requestFocus();
         final t = _budgeted.text;
         if (t.isNotEmpty) {
-          _budgeted.selection = TextSelection(baseOffset: 0, extentOffset: t.length);
+          _budgeted.selection = TextSelection(
+            baseOffset: 0,
+            extentOffset: t.length,
+          );
         }
       }
     });
@@ -1605,7 +1511,9 @@ class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
       builder: (context) {
         return CupertinoActionSheet(
           title: const Text('Archive income source?'),
-          message: const Text('This removes it from budgets but keeps history.'),
+          message: const Text(
+            'This removes it from budgets but keeps history.',
+          ),
           actions: [
             CupertinoActionSheetAction(
               isDestructiveAction: true,
@@ -1652,7 +1560,9 @@ class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
     return SafeArea(
       top: false,
       child: AnimatedPadding(
-        duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+        duration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         padding: EdgeInsets.only(bottom: keyboardBottomInset),
         child: Align(
@@ -1683,17 +1593,20 @@ class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
                           const SizedBox(width: 34),
                           Expanded(
                             child: Text(
-                              isEditing ? 'Edit income source' : 'New income source',
+                              isEditing
+                                  ? 'Edit income source'
+                                  : 'New income source',
                               textAlign: TextAlign.center,
-                              style: CupertinoTheme.of(context)
-                                  .textTheme
-                                  .navTitleTextStyle,
+                              style: CupertinoTheme.of(
+                                context,
+                              ).textTheme.navTitleTextStyle,
                             ),
                           ),
                           CupertinoButton(
                             padding: EdgeInsets.zero,
-                            onPressed:
-                                _saving ? null : () => Navigator.of(context).pop(false),
+                            onPressed: _saving
+                                ? null
+                                : () => Navigator.of(context).pop(false),
                             child: const Icon(CupertinoIcons.xmark, size: 18),
                           ),
                         ],
@@ -1753,7 +1666,9 @@ class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
                               child: Text(
                                 'Archive',
                                 style: TextStyle(
-                                  color: CupertinoColors.systemRed.resolveFrom(context),
+                                  color: CupertinoColors.systemRed.resolveFrom(
+                                    context,
+                                  ),
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -1765,7 +1680,9 @@ class _IncomeSourceSheetState extends State<_IncomeSourceSheet> {
                       decoration: BoxDecoration(
                         border: Border(
                           top: BorderSide(
-                            color: CupertinoColors.separator.resolveFrom(context),
+                            color: CupertinoColors.separator.resolveFrom(
+                              context,
+                            ),
                           ),
                         ),
                       ),
@@ -1830,7 +1747,10 @@ class _PodBudgetSheetState extends State<_PodBudgetSheet> {
       _budgetedFocus.requestFocus();
       final t = _budgeted.text;
       if (t.isEmpty) return;
-      _budgeted.selection = TextSelection(baseOffset: 0, extentOffset: t.length);
+      _budgeted.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: t.length,
+      );
     });
   }
 
@@ -1881,8 +1801,9 @@ class _PodBudgetSheetState extends State<_PodBudgetSheet> {
     return AnimatedBuilder(
       animation: _budgeted,
       builder: (context, _) {
-        final availableCents =
-            widget.pod.balanceError == null ? widget.pod.balanceCents : null;
+        final availableCents = widget.pod.balanceError == null
+            ? widget.pod.balanceCents
+            : null;
         final previewBg = CupertinoColors.systemGrey6.resolveFrom(context);
         final divider = CupertinoColors.separator.resolveFrom(context);
 
@@ -1994,154 +1915,156 @@ class _PodBudgetSheetState extends State<_PodBudgetSheet> {
     return SafeArea(
       top: false,
       child: AnimatedPadding(
-        duration:
-            reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+        duration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         // Lift the entire sheet above the keyboard.
         padding: EdgeInsets.only(bottom: keyboardBottomInset),
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: GlassSurface(
-            borderRadius: const BorderRadius.all(Radius.circular(24)),
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              height: height,
-              child: Column(
-                children: [
-                  const SizedBox(height: 10),
-                  Container(
-                    width: 40,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: CupertinoColors.systemGrey2.resolveFrom(context),
-                      borderRadius: BorderRadius.circular(99),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: GlassSurface(
+              borderRadius: const BorderRadius.all(Radius.circular(24)),
+              padding: EdgeInsets.zero,
+              child: SizedBox(
+                height: height,
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    Container(
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.systemGrey2.resolveFrom(context),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        const SizedBox(width: 34),
-                        Expanded(
-                          child: Text(
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 34),
+                          Expanded(
+                            child: Text(
                               'Envelope budget',
-                            textAlign: TextAlign.center,
-                            style: CupertinoTheme.of(
-                              context,
-                            ).textTheme.navTitleTextStyle,
+                              textAlign: TextAlign.center,
+                              style: CupertinoTheme.of(
+                                context,
+                              ).textTheme.navTitleTextStyle,
+                            ),
                           ),
-                        ),
-                        CupertinoButton(
-                          padding: EdgeInsets.zero,
-                          onPressed: _saving
-                              ? null
-                              : () => Navigator.of(context).pop(false),
-                          child: const Icon(CupertinoIcons.xmark, size: 18),
-                        ),
-                      ],
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: _saving
+                                ? null
+                                : () => Navigator.of(context).pop(false),
+                            child: const Icon(CupertinoIcons.xmark, size: 18),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: reduceMotion
-                          ? Duration.zero
-                          : const Duration(milliseconds: 180),
-                      child: KeyedSubtree(
-                        key: ValueKey(_saving),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        child: KeyedSubtree(
+                          key: ValueKey(_saving),
                           child: Column(
                             children: [
                               Expanded(
-                        child: ListView(
+                                child: ListView(
                                   padding: const EdgeInsets.fromLTRB(
                                     16,
                                     8,
                                     16,
                                     16,
                                   ),
-                          children: [
-                            Text(
-                              widget.pod.name,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: primary,
-                              ),
-                            ),
-                                    const SizedBox(height: 12),
-                                  Text(
-                                    'Budgeted (monthly)',
-                                    style: TextStyle(
-                                      color: secondary,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  CupertinoTextField(
-                                    controller: _budgeted,
-                                    focusNode: _budgetedFocus,
-                                    enabled: !_saving,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                      signed: false,
-                                    ),
-                                    textInputAction: TextInputAction.done,
-                                    onSubmitted: (_) => _save(),
-                                    padding: const EdgeInsets.all(12),
-                                    placeholder: '0.00',
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _budgetPreview(
-                                    context: context,
-                                    secondary: secondary,
-                                  ),
-                                  const SizedBox(height: 14),
-                            CupertinoButton(
-                              padding: EdgeInsets.zero,
-                                    onPressed: _saving ? null : _pickSection,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                        vertical: 10,
-                                ),
-                                child: Row(
                                   children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Category',
-                                        style: TextStyle(
+                                    Text(
+                                      widget.pod.name,
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        color: primary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'Budgeted (monthly)',
+                                      style: TextStyle(
+                                        color: secondary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    CupertinoTextField(
+                                      controller: _budgeted,
+                                      focusNode: _budgetedFocus,
+                                      enabled: !_saving,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                            signed: false,
+                                          ),
+                                      textInputAction: TextInputAction.done,
+                                      onSubmitted: (_) => _save(),
+                                      padding: const EdgeInsets.all(12),
+                                      placeholder: '0.00',
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _budgetPreview(
+                                      context: context,
+                                      secondary: secondary,
+                                    ),
+                                    const SizedBox(height: 14),
+                                    CupertinoButton(
+                                      padding: EdgeInsets.zero,
+                                      onPressed: _saving ? null : _pickSection,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 10,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                'Category',
+                                                style: TextStyle(
+                                                  color: secondary,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            Text(
+                                              _displayCategory(),
+                                              style: TextStyle(
                                                 color: secondary,
                                                 fontSize: 13,
                                                 fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Icon(
+                                              CupertinoIcons.chevron_right,
+                                              size: 16,
+                                              color: CupertinoColors
+                                                  .tertiaryLabel
+                                                  .resolveFrom(context),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    ),
-                                    Text(
-                                            _displayCategory(),
-                                      style: TextStyle(
-                                        color: secondary,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                          const SizedBox(width: 6),
-                                    Icon(
-                                      CupertinoIcons.chevron_right,
-                                            size: 16,
-                                      color: CupertinoColors.tertiaryLabel
-                                          .resolveFrom(context),
                                     ),
                                   ],
                                 ),
                               ),
-                            ),
-                                ],
-                              ),
-                            ),
                               Container(
                                 decoration: BoxDecoration(
                                   border: Border(
@@ -2151,26 +2074,30 @@ class _PodBudgetSheetState extends State<_PodBudgetSheet> {
                                     ),
                                   ),
                                 ),
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  12,
+                                  16,
+                                  12,
+                                ),
                                 child: SizedBox(
                                   width: double.infinity,
                                   child: CupertinoButton.filled(
-                              onPressed: _saving ? null : _save,
-                              child: _saving
+                                    onPressed: _saving ? null : _save,
+                                    child: _saving
                                         ? const CupertinoActivityIndicator(
                                             radius: 10,
                                           )
-                                  : const Text('Save'),
+                                        : const Text('Save'),
                                   ),
                                 ),
-                            ),
-                          ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
                 ),
               ),
             ),

@@ -11,4 +11,7 @@ class Env {
 
   static String get googleWebClientId =>
       const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+
+  static String get backendBaseUrl =>
+      const String.fromEnvironment('BACKEND_BASE_URL');
 }

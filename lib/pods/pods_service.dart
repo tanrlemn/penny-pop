@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:penny_pop_app/pods/pod_models.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -20,6 +21,14 @@ class PodsService {
     final data = await query.order('name', ascending: true);
     final rows = (data as List).cast<Map>().map((r) => r.cast<String, dynamic>());
     return rows.map(Pod.fromRow).toList(growable: false);
+  }
+
+  Future<List<Pod>> listPodsWithSettings({
+    required String householdId,
+  }) async {
+    final pods = await listPods(householdId: householdId);
+    debugPrint('Pods DB refresh: household=$householdId pods=${pods.length}');
+    return pods;
   }
 
   Future<DateTime?> latestBalanceUpdatedAt({required String householdId}) async {
