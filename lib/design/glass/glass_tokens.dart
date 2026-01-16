@@ -12,7 +12,7 @@ abstract final class GlassTokens {
   static const BorderRadius radiusXl = BorderRadius.all(Radius.circular(24));
 
   static const EdgeInsets paddingSm = EdgeInsets.all(10);
-  static const EdgeInsets paddingMd = EdgeInsets.all(12);
+  static const EdgeInsets paddingMd = EdgeInsets.all(16);
 
   /// Blur strength by surface type (used by the Flutter fallback, and as a
   /// general “thickness” hint).
@@ -91,6 +91,9 @@ abstract final class GlassTokens {
   }
 
   static List<BoxShadow> shadowsFor(Brightness brightness, GlassVariant variant) {
+    if (variant == GlassVariant.card) {
+      return const <BoxShadow>[];
+    }
     // Very subtle depth; keep it minimal so it reads like iOS material.
     final blur = switch (variant) {
       GlassVariant.bar => 16.0,

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:penny_pop_app/app/penny_pop_scope.dart';
+import 'package:penny_pop_app/api/api_errors.dart';
+import 'package:penny_pop_app/api/api_models.dart';
 import 'package:penny_pop_app/chat/chat_models.dart';
 import 'package:penny_pop_app/chat/chat_service.dart';
 import 'package:penny_pop_app/design/glass/glass.dart';
@@ -36,7 +40,6 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isNearBottom = true;
 
   static const bool _debugShowEntityChips = kDebugMode;
-  static const int _maxMessageChars = 800;
 
   final Map<String, String> _selectedRepairGroupActionIds = {};
   final Set<String> _dismissedRepairGroups = {};
@@ -98,8 +101,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
-    if (message.length > _maxMessageChars) {
-      showGlassToast(context, 'Message too long (max 800 chars).');
+    if (message.length > kMaxMessageChars) {
+      showGlassToast(context, 'Message is too long (max 500 chars).');
       return;
     }
 
@@ -124,18 +127,26 @@ class _ChatScreenState extends State<ChatScreen> {
         householdId: householdId,
         messageText: message,
       );
-      debugPrint('Chat message response: $response');
-
-      if (!_isValidChatResponse(response.data)) {
-        _handleInvalidChatResponse(
-          response.data,
-          messageId: localMessageId,
-          typingId: typingId,
+      debugPrint(
+        'Chat message ok: traceId=${response.traceId} actions=${response.proposedActions.length}',
+      );
+      // TEMP DEBUG (remove later): backend debug + assistantText
+      debugPrint('Chat response assistantText: ${response.assistantText}');
+      debugPrint('Chat response debug: ${response.debug}');
+      final debug = response.debug;
+      if (debug != null) {
+        debugPrint('Chat response debug.aiEnabled: ${debug['aiEnabled']}');
+        debugPrint('Chat response debug.aiAttempted: ${debug['aiAttempted']}');
+        debugPrint('Chat response debug.aiSucceeded: ${debug['aiSucceeded']}');
+        debugPrint(
+          'Chat response debug.aiFailureStage: ${debug['aiFailureStage']}',
         );
-        return;
+        debugPrint('Chat response debug.modeChosen: ${debug['modeChosen']}');
+        debugPrint(
+          'Chat response debug.aiErrorMessage: ${debug['aiErrorMessage']}',
+        );
       }
-
-      final mapped = _mapResponseToChatItem(response.data);
+      final mapped = _mapResponseToChatItem(response);
 
       if (!mounted) return;
       setState(() {
@@ -145,13 +156,14 @@ class _ChatScreenState extends State<ChatScreen> {
       });
       _scrollToBottom();
     } catch (e) {
-      debugPrint('Chat message failed: $e');
+      final traceId = (e is ApiException) ? e.traceId : null;
+      debugPrint('Chat message failed: traceId=$traceId error=$e');
       if (!mounted) return;
       setState(() {
         _updateMessageStatus(localMessageId, ChatMessageStatus.failed);
         _removeItemById(typingId);
       });
-      showGlassToast(context, 'Send failed. Tap to retry.');
+      _showChatErrorToast(e);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -186,8 +198,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final message = item.text.trim();
     if (message.isEmpty) return;
-    if (message.length > _maxMessageChars) {
-      showGlassToast(context, 'Message too long (max 800 chars).');
+    if (message.length > kMaxMessageChars) {
+      showGlassToast(context, 'Message is too long (max 500 chars).');
       return;
     }
 
@@ -205,18 +217,26 @@ class _ChatScreenState extends State<ChatScreen> {
         householdId: householdId,
         messageText: message,
       );
-      debugPrint('Chat message response: $response');
-
-      if (!_isValidChatResponse(response.data)) {
-        _handleInvalidChatResponse(
-          response.data,
-          messageId: item.id,
-          typingId: typingId,
+      debugPrint(
+        'Chat retry ok: traceId=${response.traceId} actions=${response.proposedActions.length}',
+      );
+      // TEMP DEBUG (remove later): backend debug + assistantText
+      debugPrint('Chat response assistantText: ${response.assistantText}');
+      debugPrint('Chat response debug: ${response.debug}');
+      final debug = response.debug;
+      if (debug != null) {
+        debugPrint('Chat response debug.aiEnabled: ${debug['aiEnabled']}');
+        debugPrint('Chat response debug.aiAttempted: ${debug['aiAttempted']}');
+        debugPrint('Chat response debug.aiSucceeded: ${debug['aiSucceeded']}');
+        debugPrint(
+          'Chat response debug.aiFailureStage: ${debug['aiFailureStage']}',
         );
-        return;
+        debugPrint('Chat response debug.modeChosen: ${debug['modeChosen']}');
+        debugPrint(
+          'Chat response debug.aiErrorMessage: ${debug['aiErrorMessage']}',
+        );
       }
-
-      final mapped = _mapResponseToChatItem(response.data);
+      final mapped = _mapResponseToChatItem(response);
 
       if (!mounted) return;
       setState(() {
@@ -226,13 +246,14 @@ class _ChatScreenState extends State<ChatScreen> {
       });
       _scrollToBottom();
     } catch (e) {
-      debugPrint('Chat retry failed: $e');
+      final traceId = (e is ApiException) ? e.traceId : null;
+      debugPrint('Chat retry failed: traceId=$traceId error=$e');
       if (!mounted) return;
       setState(() {
         _updateMessageStatus(item.id, ChatMessageStatus.failed);
         _removeItemById(typingId);
       });
-      showGlassToast(context, 'Retry failed. Tap again.');
+      _showChatErrorToast(e);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -252,25 +273,33 @@ class _ChatScreenState extends State<ChatScreen> {
         householdId: householdId,
         actionIds: [action.id],
       );
-      final traceId = _extractTraceId(response.data);
-      debugPrint('Chat apply response: traceId=$traceId data=${response.data}');
-
-      if (!_isApplyResponseOk(response.data, action.id)) {
-        throw Exception('Unexpected apply response.');
+      debugPrint(
+        'Chat apply ok: traceId=${response.traceId} applied=${response.appliedActionIds.length}',
+      );
+      if (!response.verifiedApplied(action.id)) {
+        throw ApiParseException(
+          traceId: response.traceId,
+          message: 'Apply response missing applied action id',
+        );
       }
 
       if (!mounted) return;
       _setActionStatus(action.id, ActionStatus.applied);
       setState(() {
         _items.add(ChatItem.assistant('✅ Updated budgets.'));
+        final summary = _formatApplyChangesSummary(response.changes);
+        if (summary != null) {
+          _items.add(ChatItem.assistant(summary));
+        }
         _applyingActionId = null;
       });
       _scrollToBottom();
       _triggerPodsRefresh();
     } catch (e) {
-      debugPrint('Chat apply failed: $e');
+      final traceId = (e is ApiException) ? e.traceId : null;
+      debugPrint('Chat apply failed: traceId=$traceId error=$e');
       if (!mounted) return;
-      showGlassToast(context, 'Update failed. Try again.');
+      _showChatErrorToast(e);
       setState(() => _applyingActionId = null);
       _scrollToBottom();
     }
@@ -293,25 +322,33 @@ class _ChatScreenState extends State<ChatScreen> {
         householdId: householdId,
         actionIds: [selectedActionId],
       );
-      final traceId = _extractTraceId(response.data);
-      debugPrint('Chat apply response: traceId=$traceId data=${response.data}');
-
-      if (!_isApplyResponseOk(response.data, selectedActionId)) {
-        throw Exception('Unexpected apply response.');
+      debugPrint(
+        'Chat apply ok: traceId=${response.traceId} applied=${response.appliedActionIds.length}',
+      );
+      if (!response.verifiedApplied(selectedActionId)) {
+        throw ApiParseException(
+          traceId: response.traceId,
+          message: 'Apply response missing applied action id',
+        );
       }
 
       if (!mounted) return;
       _setActionsStatus(groupActionIds, ActionStatus.applied);
       setState(() {
         _items.add(ChatItem.assistant('✅ Updated budgets.'));
+        final summary = _formatApplyChangesSummary(response.changes);
+        if (summary != null) {
+          _items.add(ChatItem.assistant(summary));
+        }
         _applyingActionId = null;
       });
       _scrollToBottom();
       _triggerPodsRefresh();
     } catch (e) {
-      debugPrint('Chat apply failed: $e');
+      final traceId = (e is ApiException) ? e.traceId : null;
+      debugPrint('Chat apply failed: traceId=$traceId error=$e');
       if (!mounted) return;
-      showGlassToast(context, 'Update failed. Try again.');
+      _showChatErrorToast(e);
       setState(() => _applyingActionId = null);
       _scrollToBottom();
     }
@@ -322,47 +359,67 @@ class _ChatScreenState extends State<ChatScreen> {
     PodsRefreshBus.instance.requestRefresh(reason: 'apply');
   }
 
-  void _handleInvalidChatResponse(
-    Map<String, dynamic> data, {
-    required String messageId,
-    required String typingId,
-  }) {
-    final traceId = _extractTraceId(data);
-    debugPrint('Chat response invalid: traceId=$traceId data=$data');
+  void _showChatErrorToast(Object e) {
+    String? traceId;
+    if (e is ApiException) traceId = e.traceId;
+
+    if (e is ApiRateLimitedException) {
+      final n = e.retryAfterSeconds;
+      if (n != null) {
+        showGlassToast(context, 'Too many requests. Try again in ${n}s.');
+      } else {
+        showGlassToast(context, 'Too many requests. Try again soon.');
+      }
+      _maybeShowCopyTraceId(traceId);
+      return;
+    }
+
+    if (e is TimeoutException) {
+      showGlassToast(context, 'Network timeout. Try again.');
+      _maybeShowCopyTraceId(traceId);
+      return;
+    }
+
+    if (e is ApiParseException) {
+      showGlassToast(context, 'Server response error. Try again.');
+      _maybeShowCopyTraceId(traceId);
+      return;
+    }
+
+    showGlassToast(context, 'Something went wrong. Try again.');
+    _maybeShowCopyTraceId(traceId);
+  }
+
+  void _maybeShowCopyTraceId(String? traceId) {
+    if (!kDebugMode) return;
+    final id = traceId?.trim();
+    if (id == null || id.isEmpty) return;
     if (!mounted) return;
-    setState(() {
-      _updateMessageStatus(messageId, ChatMessageStatus.failed);
-      _removeItemById(typingId);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showCupertinoModalPopup<void>(
+        context: context,
+        builder: (sheetContext) => CupertinoActionSheet(
+          title: const Text('Debug'),
+          message: Text('traceId: $id'),
+          actions: [
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.of(sheetContext).pop();
+                Clipboard.setData(ClipboardData(text: id));
+                showGlassToast(context, 'Trace id copied');
+              },
+              child: const Text('Copy trace id'),
+            ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.of(sheetContext).pop(),
+            child: const Text('Cancel'),
+          ),
+        ),
+      );
     });
-    showGlassToast(context, 'Unexpected server response.');
-  }
-
-  bool _isValidChatResponse(Map<String, dynamic> data) {
-    final assistantText = data['assistantText'];
-    final proposedActions = data['proposedActions'];
-    if (assistantText is! String || assistantText.trim().isEmpty) {
-      return false;
-    }
-    if (proposedActions is! List) {
-      return false;
-    }
-    return true;
-  }
-
-  bool _isApplyResponseOk(Map<String, dynamic> data, String actionId) {
-    final ok = data['ok'];
-    if (ok is bool && ok == true) return true;
-
-    final applied = data['appliedActionIds'];
-    if (applied is List) {
-      return applied.any((id) => id?.toString() == actionId);
-    }
-    return false;
-  }
-
-  String? _extractTraceId(Map<String, dynamic> data) {
-    final traceId = data['traceId'] ?? data['trace_id'];
-    return traceId?.toString();
   }
 
   void _scrollToBottom({bool force = false}) {
@@ -461,54 +518,43 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageFocus.requestFocus();
   }
 
-  ChatItem _mapResponseToChatItem(Map<String, dynamic> data) {
-    final actions = _resolveActions(data);
-    final assistantText = _resolveAssistantMessage(data);
-    final clarification =
-        (_debugShowEntityChips && actions.isEmpty) ? _resolveClarification(data) : null;
+  ChatItem _mapResponseToChatItem(ChatApiResponse response) {
+    final actions = _resolveActions(response.proposedActions);
+    final clarification = (_debugShowEntityChips && actions.isEmpty)
+        ? _resolveClarification(response.entities)
+        : null;
     return ChatItem.assistant(
-      assistantText,
+      response.assistantText,
       actions: actions,
+      warnings: response.warnings,
       clarification: clarification,
     );
   }
 
-  String _resolveAssistantMessage(Map<String, dynamic> data) {
-    final raw = data['assistantText'];
-    if (raw is String && raw.trim().isNotEmpty) {
-      return raw.trim();
+  List<ProposedAction> _resolveActions(List<ProposedActionDto> dtos) {
+    final actions = <ProposedAction>[];
+    for (var i = 0; i < dtos.length; i++) {
+      final dto = dtos[i];
+      actions.add(
+        ProposedAction.fromJson(
+          <String, dynamic>{
+            'id': dto.id,
+            'type': dto.type,
+            'status': dto.status,
+            'payload': dto.payload,
+            'title': dto.title,
+            'summary': dto.summary,
+            'confidence': dto.confidence,
+          },
+          fallbackId: 'action_$i',
+        ),
+      );
     }
-    return '...';
+    return actions;
   }
 
-  List<ProposedAction> _resolveActions(Map<String, dynamic> data) {
-    final raw = data['proposedActions'] ?? data['actions'] ?? data['actionProposals'];
-    if (raw is List) {
-      final actions = <ProposedAction>[];
-      for (var i = 0; i < raw.length; i++) {
-        final entry = raw[i];
-        if (entry is Map) {
-          final json = entry.cast<String, dynamic>();
-          actions.add(ProposedAction.fromJson(json, fallbackId: 'action_$i'));
-        } else if (entry is String) {
-          actions.add(
-            ProposedAction(
-              id: entry,
-              type: 'unknown',
-              payload: null,
-              status: ActionStatus.proposed,
-            ),
-          );
-        }
-      }
-      return actions;
-    }
-    return const [];
-  }
-
-  ChatClarification? _resolveClarification(Map<String, dynamic> data) {
-    final entities = data['entities'];
-    if (entities is! Map) return null;
+  ChatClarification? _resolveClarification(Map<String, dynamic>? entities) {
+    if (entities == null) return null;
     final fromCandidate = entities['fromCandidate']?.toString().trim();
     final toCandidate = entities['toCandidate']?.toString().trim();
 
@@ -556,6 +602,33 @@ class _ChatScreenState extends State<ChatScreen> {
         ? '\$$dollars'
         : '\$$dollars.${remainder.toString().padLeft(2, '0')}';
     return cents < 0 ? '-$amount' : amount;
+  }
+
+  String? _formatApplyChangesSummary(List<ChangeDto>? changes) {
+    if (changes == null || changes.isEmpty) return null;
+    final parts = <String>[];
+    for (final c in changes) {
+      final sign = c.deltaInCents < 0 ? '−' : '+';
+      final amt = _formatDollarsFromCents(c.deltaInCents.abs());
+      parts.add('${c.podName} $sign$amt');
+      if (parts.length >= 4) break;
+    }
+    final text = 'Updated budgets: ${parts.join(', ')}';
+    return _truncateOneLine(text, 110);
+  }
+
+  String _truncateOneLine(String text, int maxChars) {
+    final s = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (s.length <= maxChars) return s;
+    return '${s.substring(0, maxChars)}…';
+  }
+
+  String? _confidenceLabel(double? confidence) {
+    if (confidence == null) return null;
+    final c = confidence.clamp(0.0, 1.0);
+    if (c >= 0.75) return 'High';
+    if (c >= 0.45) return 'Med';
+    return 'Low';
   }
 
   void _setActionStatus(String actionId, ActionStatus status) {
@@ -906,6 +979,17 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
           ),
+          if (item.warnings.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              item.warnings.join(' • '),
+              style: TextStyle(
+                color: secondaryText,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           if (item.actions.isNotEmpty) ...[
             const SizedBox(height: 12),
             ..._buildActionWidgets(
@@ -1012,21 +1096,51 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
 
+    final effectiveTitle =
+        action.title?.trim().isNotEmpty == true ? action.title!.trim() : title;
+    final summary = action.summary?.trim();
+    final confidenceLabel = _confidenceLabel(action.confidence);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassCard(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: TextStyle(
-                color: primaryText,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    effectiveTitle,
+                    style: TextStyle(
+                      color: primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (confidenceLabel != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    confidenceLabel,
+                    style: TextStyle(
+                      color: secondaryText,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
             ),
+            if (summary != null && summary.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                summary,
+                style: TextStyle(color: secondaryText, fontSize: 13),
+              ),
+            ],
             if (line1 != null && line1.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
@@ -1052,18 +1166,23 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(height: 10),
             Container(height: 1, color: dividerColor),
             const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: CupertinoButton.filled(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    onPressed: isDisabled ? null : () => _applyAction(action),
-                    child: isBusy
-                        ? const CupertinoActivityIndicator(radius: 10)
-                        : Text(buttonLabel),
-                  ),
-                ),
-              ],
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              minSize: 0,
+              onPressed: isDisabled ? null : () => _applyAction(action),
+              child: isBusy
+                  ? const CupertinoActivityIndicator(radius: 10)
+                  : Text(
+                      buttonLabel,
+                      style: TextStyle(
+                        color: isDisabled
+                            ? secondaryText
+                            : CupertinoColors.activeBlue.resolveFrom(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -1177,7 +1296,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassCard(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1266,20 +1385,28 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(height: 6),
             Container(height: 1, color: dividerColor),
             const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: CupertinoButton.filled(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                onPressed: isDisabled
-                    ? null
-                    : () => _applyRepairGroup(
-                          selectedActionId: selectedId,
-                          groupActionIds: sortedActions.map((a) => a.id).toList(),
-                        ),
-                child: isBusy
-                    ? const CupertinoActivityIndicator(radius: 10)
-                    : Text(hasApplied ? 'Applied' : 'Apply selected option'),
-              ),
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              minSize: 0,
+              onPressed: isDisabled
+                  ? null
+                  : () => _applyRepairGroup(
+                        selectedActionId: selectedId,
+                        groupActionIds: sortedActions.map((a) => a.id).toList(),
+                      ),
+              child: isBusy
+                  ? const CupertinoActivityIndicator(radius: 10)
+                  : Text(
+                      hasApplied ? 'Applied' : 'Apply selected option',
+                      style: TextStyle(
+                        color: isDisabled
+                            ? secondaryText
+                            : CupertinoColors.activeBlue.resolveFrom(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -1366,7 +1493,9 @@ class ChatItem {
     List<ProposedAction>? actions,
     required this.clarification,
     required this.status,
-  }) : actions = actions ?? const [];
+    List<String>? warnings,
+  })  : actions = actions ?? const [],
+        warnings = warnings ?? const [];
 
   final String id;
   final String text;
@@ -1374,6 +1503,7 @@ class ChatItem {
   final List<ProposedAction> actions;
   final ChatClarification? clarification;
   final ChatMessageStatus? status;
+  final List<String> warnings;
 
   ChatItem copyWith({
     String? id,
@@ -1382,6 +1512,7 @@ class ChatItem {
     List<ProposedAction>? actions,
     ChatClarification? clarification,
     ChatMessageStatus? status,
+    List<String>? warnings,
   }) {
     return ChatItem(
       id: id ?? this.id,
@@ -1390,6 +1521,7 @@ class ChatItem {
       actions: actions ?? this.actions,
       clarification: clarification ?? this.clarification,
       status: status ?? this.status,
+      warnings: warnings ?? this.warnings,
     );
   }
 
@@ -1404,6 +1536,7 @@ class ChatItem {
         kind: ChatItemKind.userMessage,
         clarification: null,
         status: status,
+        warnings: const [],
       );
 
   factory ChatItem.typing({required String id}) => ChatItem(
@@ -1412,11 +1545,13 @@ class ChatItem {
         kind: ChatItemKind.assistantTyping,
         clarification: null,
         status: null,
+        warnings: const [],
       );
 
   factory ChatItem.assistant(
     String text, {
     List<ProposedAction>? actions,
+    List<String>? warnings,
     ChatClarification? clarification,
   }) {
     return ChatItem(
@@ -1424,6 +1559,7 @@ class ChatItem {
       text: text,
       kind: ChatItemKind.assistantMessage,
       actions: actions,
+      warnings: warnings,
       clarification: clarification,
       status: null,
     );

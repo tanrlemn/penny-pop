@@ -4,12 +4,18 @@ class ProposedAction {
     required this.type,
     required this.payload,
     required this.status,
+    this.title,
+    this.summary,
+    this.confidence,
   });
 
   final String id;
   final String type;
   final ActionPayload? payload;
   final ActionStatus status;
+  final String? title;
+  final String? summary;
+  final double? confidence;
 
   BudgetTransferPayload? get budgetTransferPayload =>
       payload is BudgetTransferPayload ? payload as BudgetTransferPayload : null;
@@ -25,6 +31,9 @@ class ProposedAction {
       type: type,
       payload: payload,
       status: status ?? this.status,
+      title: title,
+      summary: summary,
+      confidence: confidence,
     );
   }
 
@@ -45,11 +54,17 @@ class ProposedAction {
       _ => null,
     };
     final status = ActionStatus.fromString(json['status']?.toString());
+    final title = json['title']?.toString();
+    final summary = json['summary']?.toString();
+    final confidence = _parseConfidence(json['confidence']);
     return ProposedAction(
       id: (id == null || id.isEmpty) ? fallbackId : id,
       type: type,
       payload: payload,
       status: status,
+      title: (title == null || title.trim().isEmpty) ? null : title.trim(),
+      summary: (summary == null || summary.trim().isEmpty) ? null : summary.trim(),
+      confidence: confidence,
     );
   }
 }
@@ -128,4 +143,28 @@ int? _parseCents(dynamic raw) {
   if (raw is num) return raw.toInt();
   if (raw == null) return null;
   return int.tryParse(raw.toString());
+}
+
+double? _parseConfidence(dynamic raw) {
+  if (raw is double) return raw;
+  if (raw is int) return raw.toDouble();
+  if (raw is num) return raw.toDouble();
+  if (raw is String) {
+    final s = raw.trim().toLowerCase();
+    if (s.isEmpty) return null;
+    final parsed = double.tryParse(s);
+    if (parsed != null) return parsed;
+    switch (s) {
+      case 'high':
+        return 0.9;
+      case 'med':
+      case 'medium':
+        return 0.6;
+      case 'low':
+        return 0.3;
+      default:
+        return null;
+    }
+  }
+  return null;
 }
